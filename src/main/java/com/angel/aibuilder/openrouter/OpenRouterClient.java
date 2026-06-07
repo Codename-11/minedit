@@ -65,11 +65,33 @@ public final class OpenRouterClient {
                 .get("content")
                 .getAsString();
         String generationId = string(json, "id", "");
-        String usageSummary = usageSummaryFromGeneration(apiKey, generationId).orElseGet(() -> usageSummaryFromResponse(json, generationId));
-        return new AiCompletion(text, usageSummary);
+        Optional<GenerationUsage> generationUsage = pollGenerationUsage(apiKey, generationId, 3, Duration.ofMillis(750));
+        if (generationUsage.isPresent() && generationUsage.get().hasCost()) {
+            return new AiCompletion(text, generationUsage.get().summary(), "");
+        }
+
+        String usageSummary = usageSummaryFromResponse(json, generationId);
+        return new AiCompletion(text, usageSummary, generationId);
     }
 
-    private Optional<String> usageSummaryFromGeneration(String apiKey, String generationId) throws InterruptedException {
+    public Optional<String> waitForUsageSummary(String apiKey, String generationId, Duration maxWait) throws InterruptedException {
+        long deadline = System.nanoTime() + maxWait.toNanos();
+        int attempt = 0;
+        while (System.nanoTime() < deadline) {
+            long delayMillis = attempt == 0 ? 0L : Math.min(5000L, 1000L + (attempt * 500L));
+            if (delayMillis > 0L) {
+                Thread.sleep(delayMillis);
+            }
+            Optional<GenerationUsage> usage = pollGenerationUsage(apiKey, generationId, 1, Duration.ZERO);
+            if (usage.isPresent() && usage.get().hasCost()) {
+                return Optional.of(usage.get().summary());
+            }
+            attempt++;
+        }
+        return Optional.empty();
+    }
+
+    private Optional<GenerationUsage> pollGenerationUsage(String apiKey, String generationId, int attempts, Duration retryDelay) throws InterruptedException {
         if (generationId.isBlank()) {
             return Optional.empty();
         }
@@ -81,9 +103,9 @@ public final class OpenRouterClient {
                 .GET()
                 .build();
 
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
             if (attempt > 0) {
-                Thread.sleep(750L * attempt);
+                Thread.sleep(retryDelay.toMillis());
             }
             try {
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -94,7 +116,8 @@ public final class OpenRouterClient {
                 JsonObject data = json.has("data") && json.get("data").isJsonObject()
                         ? json.getAsJsonObject("data")
                         : json;
-                return Optional.of(formatGenerationUsage(data, generationId));
+                Optional<String> cost = costDisplay(data);
+                return Optional.of(new GenerationUsage(formatGenerationUsage(data, generationId, cost), cost.isPresent()));
             } catch (IOException | RuntimeException ignored) {
                 // The build should still continue if OpenRouter usage metadata is delayed or unavailable.
             }
@@ -114,10 +137,11 @@ public final class OpenRouterClient {
         OptionalLong reasoning = nestedLongValue(usage, "completion_tokens_details", "reasoning_tokens");
         OptionalLong output = subtractIfPresent(completion, reasoning);
 
-        return formatUsageLine(generationId, "", input, reasoning, output, Optional.empty(), "response usage");
+        Optional<String> cost = generationId.isBlank() ? Optional.empty() : Optional.of("pending");
+        return formatUsageLine(generationId, "", input, reasoning, output, cost, "response usage");
     }
 
-    private static String formatGenerationUsage(JsonObject data, String fallbackGenerationId) {
+    private static String formatGenerationUsage(JsonObject data, String fallbackGenerationId, Optional<String> cost) {
         String generationId = string(data, "generation_id", string(data, "id", fallbackGenerationId));
         String model = string(data, "model", "");
         String finishReason = string(data, "finish_reason", "");
@@ -131,7 +155,7 @@ public final class OpenRouterClient {
             output = regularCompletion;
         }
 
-        return formatUsageLine(generationId, model, input, reasoning, output, costDisplay(data), finishReason);
+        return formatUsageLine(generationId, model, input, reasoning, output, cost, finishReason);
     }
 
     private static String formatUsageLine(String generationId, String model, OptionalLong input, OptionalLong reasoning, OptionalLong output, Optional<String> cost, String finishReason) {
@@ -259,5 +283,8 @@ public final class OpenRouterClient {
     private static String string(JsonObject object, String key, String fallback) {
         JsonElement value = object.get(key);
         return value != null && value.isJsonPrimitive() && !value.isJsonNull() ? value.getAsString() : fallback;
+    }
+
+    private record GenerationUsage(String summary, boolean hasCost) {
     }
 }

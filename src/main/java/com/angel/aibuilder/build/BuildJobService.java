@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -60,10 +61,10 @@ public final class BuildJobService {
                 code = ResponseParser.extractCode(completion.text());
                 BuildDebugFiles.writeLast(prompt, completion.text(), code);
                 BuildPlan plan = JsBuildRunner.run(code, selection.width(), selection.depth(), lines);
-                return new Result(code, plan, completion.usageSummary(), null);
+                return new Result(code, plan, completion.usageSummary(), completion.pendingUsageId(), null);
             } catch (Exception e) {
                 BuildDebugFiles.writeLast(prompt, completion == null ? null : completion.text(), code);
-                return new Result(null, null, "", e);
+                return new Result(null, null, "", "", e);
             } finally {
                 endGeneration(player.getUUID());
             }
@@ -79,6 +80,9 @@ public final class BuildJobService {
             }
             if (result.usageSummary != null && !result.usageSummary.isBlank()) {
                 currentPlayer.sendSystemMessage(Component.literal(result.usageSummary).withStyle(ChatFormatting.AQUA));
+            }
+            if (result.pendingUsageId != null && !result.pendingUsageId.isBlank()) {
+                scheduleOpenRouterUsageFetch(server, currentPlayer.getUUID(), options, result.pendingUsageId);
             }
             List<BuildOperation> operations = clearBeforeBuild
                     ? withInitialClear((ServerLevel) currentPlayer.level(), selection, result.plan.operations())
@@ -108,6 +112,28 @@ public final class BuildJobService {
         ACTIVE_GENERATIONS.computeIfPresent(playerId, (id, count) -> count <= 1 ? null : count - 1);
     }
 
+    private static void scheduleOpenRouterUsageFetch(MinecraftServer server, UUID playerId, AiRequestOptions options, String generationId) {
+        if (options.provider() != AiProvider.OPENROUTER || options.openRouterApiKey().isBlank()) {
+            return;
+        }
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return OPENROUTER_CLIENT.waitForUsageSummary(options.openRouterApiKey(), generationId, Duration.ofSeconds(90)).orElse("");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return "";
+            }
+        }).thenAccept(summary -> server.execute(() -> {
+            if (summary == null || summary.isBlank()) {
+                return;
+            }
+            ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+            if (player != null) {
+                player.sendSystemMessage(Component.literal(summary).withStyle(ChatFormatting.AQUA));
+            }
+        }));
+    }
+
     private static List<BuildOperation> withInitialClear(ServerLevel level, BuildSelection selection, List<BuildOperation> operations) {
         int maxRelativeY = level.getMaxY() - 1 - selection.baseY();
         if (maxRelativeY < 0) {
@@ -132,6 +158,6 @@ public final class BuildJobService {
         return OPENROUTER_CLIENT.complete(options.openRouterApiKey(), options.model(), options.effort(), prompt);
     }
 
-    private record Result(String code, BuildPlan plan, String usageSummary, Exception error) {
+    private record Result(String code, BuildPlan plan, String usageSummary, String pendingUsageId, Exception error) {
     }
 }
