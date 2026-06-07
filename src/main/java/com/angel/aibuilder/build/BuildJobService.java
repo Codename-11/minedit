@@ -118,7 +118,7 @@ public final class BuildJobService {
         }
         CompletableFuture.supplyAsync(() -> {
             try {
-                return OPENROUTER_CLIENT.waitForUsageSummary(options.openRouterApiKey(), generationId, Duration.ofSeconds(90)).orElse("");
+                return OPENROUTER_CLIENT.waitForCostSummary(options.openRouterApiKey(), generationId, Duration.ofSeconds(90)).orElse("");
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return "";

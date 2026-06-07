@@ -184,11 +184,12 @@ Provider commands:
 /codexurl http://127.0.0.1:8765
 /codex status
 /status
+/usage <openrouter-generation-id>
 ```
 
 `/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
 
-After OpenRouter builds/edits, Minedit prints usage data: input tokens, reasoning tokens, output tokens, cost/usage, finish reason, and generation id. If OpenRouter's final generation metadata is not ready immediately, the first line may show `cost pending`; Minedit keeps checking in the background and sends the final cost line when it becomes available. Minedit only displays those usage fields and does not print account IDs or API key details.
+After OpenRouter builds/edits, Minedit prints usage data: input tokens, reasoning tokens, output tokens, and generation id. If OpenRouter's final generation metadata already includes cost, that same line includes cost too; otherwise Minedit keeps checking in the background and sends a separate cost line when it becomes available. You can also run `/usage <generation-id>` to manually fetch the latest generation usage. Minedit only displays those usage fields and does not print account IDs or API key details.
 
 Set normal reasoning effort:
 

@@ -7,6 +7,7 @@ import com.angel.aibuilder.build.BuildQueue;
 import com.angel.aibuilder.build.BuildUndoManager;
 import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
+import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -26,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 public class AiBuilderCommands {
     private static final Set<String> EFFORTS = Set.of("none", "minimal", "low", "medium", "high", "xhigh");
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
+    private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
 
     @SubscribeEvent
     public void register(RegisterCommandsEvent event) {
@@ -133,6 +135,38 @@ public class AiBuilderCommands {
                     sendStatus(ctx.getSource());
                     return 1;
                 }));
+
+        event.getDispatcher().register(Commands.literal("usage")
+                .then(Commands.argument("generation_id", StringArgumentType.word())
+                        .executes(ctx -> {
+                            CommandSourceStack source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            String apiKey = AiBuilderSettings.apiKey();
+                            if (apiKey.isBlank()) {
+                                source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>."));
+                                return 0;
+                            }
+
+                            String generationId = StringArgumentType.getString(ctx, "generation_id");
+                            source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter usage for " + generationId + "...").withStyle(ChatFormatting.YELLOW), false);
+                            CompletableFuture.supplyAsync(() -> {
+                                try {
+                                    return OPENROUTER_CLIENT.fetchUsageReport(apiKey, generationId);
+                                } catch (Exception e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }).thenAccept(report -> server.execute(() -> {
+                                ChatFormatting style = report.hasCost() ? ChatFormatting.AQUA : ChatFormatting.YELLOW;
+                                source.sendSuccess(() -> Component.literal(report.summary()).withStyle(style), false);
+                                if (!report.hasCost()) {
+                                    source.sendSuccess(() -> Component.literal("OpenRouter has not exposed final cost for this generation yet. Try /usage again in a bit.").withStyle(ChatFormatting.YELLOW), false);
+                                }
+                            })).exceptionally(error -> {
+                                server.execute(() -> source.sendFailure(Component.literal("OpenRouter usage lookup failed: " + rootMessage(error))));
+                                return null;
+                            });
+                            return 1;
+                        })));
 
         event.getDispatcher().register(Commands.literal("build")
                 .then(Commands.argument("prompt", StringArgumentType.greedyString())
