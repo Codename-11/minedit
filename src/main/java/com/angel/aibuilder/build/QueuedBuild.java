@@ -27,11 +27,15 @@ final class QueuedBuild {
     private int riskyFluidSkipped;
 
     QueuedBuild(ServerPlayer player, BuildSelection selection, List<BuildOperation> operations) {
+        this(player, selection, operations, BuildUndoManager.beginSnapshot(player, (ServerLevel) player.level()));
+    }
+
+    QueuedBuild(ServerPlayer player, BuildSelection selection, List<BuildOperation> operations, BuildUndoManager.Snapshot snapshot) {
         this.playerId = player.getUUID();
         this.level = (ServerLevel) player.level();
         this.selection = selection;
         this.operations = new ArrayDeque<>(operations);
-        this.snapshot = BuildUndoManager.beginSnapshot(player, level);
+        this.snapshot = snapshot;
     }
 
     boolean isFor(UUID playerId) {

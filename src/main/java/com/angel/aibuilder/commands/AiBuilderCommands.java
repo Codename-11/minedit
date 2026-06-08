@@ -169,6 +169,74 @@ public class AiBuilderCommands {
                         })));
 
         event.getDispatcher().register(Commands.literal("build")
+                .then(Commands.literal("agent")
+                        .then(Commands.literal("step-by-step")
+                                .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                        .executes(ctx -> {
+                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                            AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                                            if (options == null) {
+                                                return 0;
+                                            }
+                                            if (options.provider() != AiProvider.CODEX_LOCAL) {
+                                                ctx.getSource().sendFailure(Component.literal("Minedit step-by-step agent build only works with Codex local. Use /provider codex-local and start the bridge with `npm --prefix bridge start`."));
+                                                return 0;
+                                            }
+
+                                            BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                            if (selection == null) {
+                                                ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                                return 0;
+                                            }
+
+                                            String prompt = StringArgumentType.getString(ctx, "prompt");
+                                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit tool agent: starting Codex tool-driven build with " + options.model() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
+                                            BuildJobService.agentStepByStepBuild(player, selection, prompt, options);
+                                            return 1;
+                                        })))
+                        .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                                    if (options == null) {
+                                        return 0;
+                                    }
+                                    if (options.provider() != AiProvider.CODEX_LOCAL) {
+                                        ctx.getSource().sendFailure(Component.literal("Minedit agent build only works with Codex local. Use /provider codex-local and start the bridge with `npm --prefix bridge start`."));
+                                        return 0;
+                                    }
+
+                                    BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                    if (selection == null) {
+                                        ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                        return 0;
+                                    }
+
+                                    String prompt = StringArgumentType.getString(ctx, "prompt");
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit agent: starting Codex agent build with " + options.model() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
+                                    BuildJobService.agentBuild(player, selection, prompt, options);
+                                    return 1;
+                                })))
+                .then(Commands.literal("stages")
+                        .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                                    if (options == null) {
+                                        return 0;
+                                    }
+
+                                    BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                    if (selection == null) {
+                                        ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                        return 0;
+                                    }
+
+                                    String prompt = StringArgumentType.getString(ctx, "prompt");
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit stages: asking " + options.targetDescription() + " (" + options.effort() + ") to build in focused stages...").withStyle(ChatFormatting.YELLOW), false);
+                                    BuildJobService.stagedBuild(player, selection, prompt, options);
+                                    return 1;
+                                })))
                 .then(Commands.argument("prompt", StringArgumentType.greedyString())
                         .executes(ctx -> {
                             ServerPlayer player = ctx.getSource().getPlayerOrException();

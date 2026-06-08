@@ -10,6 +10,7 @@ import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
@@ -18,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 public final class CodexLocalClient {
     private static final Gson GSON = new Gson();
@@ -35,6 +37,140 @@ public final class CodexLocalClient {
             throw new IOException("Codex bridge response did not include text.");
         }
         return new AiCompletion(text.getAsString(), "");
+    }
+
+    public AiCompletion agentBuild(String baseUrl, String model, String effort, String prompt, int width, int depth, Consumer<String> progress) throws IOException, InterruptedException {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", model);
+        body.addProperty("effort", effort);
+        body.addProperty("prompt", prompt);
+        body.addProperty("width", width);
+        body.addProperty("depth", depth);
+
+        JsonObject started = sendJson(endpoint(baseUrl, "/agent-build/start"), "POST", body, Duration.ofSeconds(45));
+        String jobId = string(started, "jobId", "");
+        if (jobId.isBlank()) {
+            throw new IOException("Codex bridge did not return an agent job id.");
+        }
+
+        long deadline = System.nanoTime() + Duration.ofMinutes(20).toNanos();
+        int afterSeq = 0;
+        while (System.nanoTime() < deadline) {
+            JsonObject status = sendJson(endpoint(baseUrl, "/agent-build/status?id=" + encode(jobId) + "&after=" + afterSeq), "GET", null, Duration.ofSeconds(30));
+            JsonArray events = status.getAsJsonArray("events");
+            if (events != null) {
+                for (JsonElement eventElement : events) {
+                    if (!eventElement.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject event = eventElement.getAsJsonObject();
+                    afterSeq = Math.max(afterSeq, integer(event, "seq", afterSeq));
+                    String message = string(event, "message", "");
+                    if (!message.isBlank()) {
+                        progress.accept(message);
+                    }
+                }
+            }
+
+            String state = string(status, "status", "running");
+            if ("completed".equals(state)) {
+                JsonElement text = status.get("text");
+                if (text == null || !text.isJsonPrimitive()) {
+                    throw new IOException("Codex agent completed without returning build code.");
+                }
+                String summary = string(status, "summary", "");
+                return new AiCompletion(text.getAsString(), summary);
+            }
+            if ("failed".equals(state)) {
+                throw new IOException(string(status, "error", "Codex agent build failed."));
+            }
+
+            Thread.sleep(2000);
+        }
+
+        throw new IOException("Codex agent build timed out after 20 minutes.");
+    }
+
+    public AiCompletion agentStepByStepBuild(String baseUrl, String model, String effort, String prompt, int width, int depth, Consumer<String> progress, Consumer<StepBatch> batchConsumer) throws IOException, InterruptedException {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", model);
+        body.addProperty("effort", effort);
+        body.addProperty("prompt", prompt);
+        body.addProperty("width", width);
+        body.addProperty("depth", depth);
+
+        JsonObject started = sendJson(endpoint(baseUrl, "/agent-build/step-by-step/start"), "POST", body, Duration.ofSeconds(45));
+        String jobId = string(started, "jobId", "");
+        if (jobId.isBlank()) {
+            throw new IOException("Codex bridge did not return a step-by-step agent job id.");
+        }
+
+        long deadline = System.nanoTime() + Duration.ofMinutes(30).toNanos();
+        int afterSeq = 0;
+        int afterBatch = 0;
+        StringBuilder combinedCode = new StringBuilder();
+        while (System.nanoTime() < deadline) {
+            JsonObject status = sendJson(endpoint(baseUrl, "/agent-build/status?id=" + encode(jobId) + "&after=" + afterSeq + "&afterBatch=" + afterBatch), "GET", null, Duration.ofSeconds(30));
+            JsonArray events = status.getAsJsonArray("events");
+            if (events != null) {
+                for (JsonElement eventElement : events) {
+                    if (!eventElement.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject event = eventElement.getAsJsonObject();
+                    afterSeq = Math.max(afterSeq, integer(event, "seq", afterSeq));
+                    String message = string(event, "message", "");
+                    if (!message.isBlank()) {
+                        progress.accept(message);
+                    }
+                }
+            }
+
+            JsonArray batches = status.getAsJsonArray("batches");
+            if (batches != null) {
+                for (JsonElement batchElement : batches) {
+                    if (!batchElement.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject batchObject = batchElement.getAsJsonObject();
+                    int batchId = integer(batchObject, "id", afterBatch);
+                    afterBatch = Math.max(afterBatch, batchId);
+                    String code = string(batchObject, "code", "");
+                    if (code.isBlank()) {
+                        continue;
+                    }
+                    StepBatch batch = new StepBatch(
+                            batchId,
+                            code,
+                            integer(batchObject, "operationCount", 0),
+                            integer(batchObject, "nonAirBlocks", 0),
+                            string(batchObject, "summary", "")
+                    );
+                    if (!combinedCode.isEmpty()) {
+                        combinedCode.append("\n\n");
+                    }
+                    combinedCode.append("// step ").append(batch.id()).append("\n").append(batch.code());
+                    batchConsumer.accept(batch);
+                }
+            }
+
+            String state = string(status, "status", "running");
+            if ("completed".equals(state)) {
+                String text = string(status, "text", combinedCode.toString());
+                if (text.isBlank()) {
+                    text = combinedCode.toString();
+                }
+                String summary = string(status, "summary", "");
+                return new AiCompletion(text, summary);
+            }
+            if ("failed".equals(state)) {
+                throw new IOException(string(status, "error", "Codex step-by-step agent build failed."));
+            }
+
+            Thread.sleep(1000);
+        }
+
+        throw new IOException("Codex step-by-step agent build timed out after 30 minutes.");
     }
 
     public Status status(String baseUrl, String currentModel) throws IOException, InterruptedException {
@@ -140,6 +276,10 @@ public final class CodexLocalClient {
         return endpoint.getScheme() + "://" + endpoint.getHost() + (port >= 0 ? ":" + port : "");
     }
 
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
     private static String normalizeCodexModel(String model) {
         String trimmed = model.trim();
         return trimmed.startsWith("openai/") ? trimmed.substring("openai/".length()) : trimmed;
@@ -155,6 +295,11 @@ public final class CodexLocalClient {
         return value != null && value.isJsonPrimitive() && !value.isJsonNull() ? value.getAsString() : fallback;
     }
 
+    private static int integer(JsonObject object, String key, int fallback) {
+        JsonElement value = object.get(key);
+        return value != null && value.isJsonPrimitive() && !value.isJsonNull() ? value.getAsInt() : fallback;
+    }
+
     public record Status(
             boolean needsLogin,
             String authLabel,
@@ -164,5 +309,8 @@ public final class CodexLocalClient {
             String normalizedCurrentModel,
             List<String> supportedEfforts
     ) {
+    }
+
+    public record StepBatch(int id, String code, int operationCount, int nonAirBlocks, String summary) {
     }
 }

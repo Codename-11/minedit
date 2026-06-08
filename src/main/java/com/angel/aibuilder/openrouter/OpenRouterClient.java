@@ -7,7 +7,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -19,6 +22,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Consumer;
 
 public final class OpenRouterClient {
     private static final Gson GSON = new Gson();
@@ -27,10 +31,16 @@ public final class OpenRouterClient {
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt) throws IOException, InterruptedException {
+        return complete(apiKey, model, effort, prompt, ignored -> {
+        });
+    }
+
+    public AiCompletion complete(String apiKey, String model, String effort, String prompt, Consumer<String> progress) throws IOException, InterruptedException {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0.25);
         body.addProperty("reasoning_effort", effort);
+        body.addProperty("stream", true);
         JsonObject reasoning = new JsonObject();
         reasoning.addProperty("effort", effort);
         body.add("reasoning", reasoning);
@@ -51,28 +61,28 @@ public final class OpenRouterClient {
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("OpenRouter returned HTTP " + response.statusCode() + ": " + response.body());
+            throw new IOException("OpenRouter returned HTTP " + response.statusCode() + ": " + readBody(response.body()));
         }
 
-        JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
-        JsonArray choices = json.getAsJsonArray("choices");
-        if (choices == null || choices.isEmpty()) {
-            throw new IOException("OpenRouter response did not include choices.");
+        progress.accept("OpenRouter: stream connected.");
+        String headerGenerationId = response.headers().firstValue("X-Generation-Id").orElse("");
+        StreamingResult streaming = readStreamingResponse(response.body(), progress, headerGenerationId);
+        String text = streaming.text();
+        if (text.isBlank()) {
+            throw new IOException("OpenRouter streamed no assistant content.");
         }
 
-        String text = choices.get(0).getAsJsonObject()
-                .getAsJsonObject("message")
-                .get("content")
-                .getAsString();
-        String generationId = string(json, "id", "");
+        String generationId = streaming.generationId();
         Optional<GenerationUsage> generationUsage = pollGenerationUsage(apiKey, generationId, 3, Duration.ofMillis(750));
         if (generationUsage.isPresent() && generationUsage.get().hasCost()) {
             return new AiCompletion(text, generationUsage.get().summary(), "");
         }
 
-        String usageSummary = usageSummaryFromResponse(json, generationId);
+        String usageSummary = streaming.usage() == null
+                ? (generationId.isBlank() ? "" : "OpenRouter usage: unavailable for " + generationId + ".")
+                : usageSummaryFromResponse(streaming.usageWrapper(), generationId);
         return new AiCompletion(text, usageSummary, generationId);
     }
 
@@ -146,6 +156,160 @@ public final class OpenRouterClient {
         }
 
         return Optional.empty();
+    }
+
+    private static StreamingResult readStreamingResponse(InputStream body, Consumer<String> progress, String initialGenerationId) throws IOException {
+        StringBuilder content = new StringBuilder();
+        StringBuilder eventData = new StringBuilder();
+        StreamProgress streamProgress = new StreamProgress(progress);
+        String generationId = initialGenerationId;
+        JsonObject usage = null;
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    StreamChunk chunk = processEventData(eventData, content, generationId, usage, streamProgress);
+                    generationId = chunk.generationId();
+                    usage = chunk.usage();
+                    eventData.setLength(0);
+                } else if (line.startsWith("data:")) {
+                    if (!eventData.isEmpty()) {
+                        eventData.append('\n');
+                    }
+                    eventData.append(line.substring(5).trim());
+                }
+            }
+        }
+
+        StreamChunk chunk = processEventData(eventData, content, generationId, usage, streamProgress);
+        generationId = chunk.generationId();
+        usage = chunk.usage();
+        streamProgress.finish(content.length());
+        return new StreamingResult(content.toString(), generationId, usage);
+    }
+
+    private static StreamChunk processEventData(StringBuilder eventData, StringBuilder content, String generationId, JsonObject usage, StreamProgress progress) throws IOException {
+        if (eventData.isEmpty()) {
+            return new StreamChunk(generationId, usage);
+        }
+        String data = eventData.toString().trim();
+        if (data.isBlank() || "[DONE]".equals(data)) {
+            return new StreamChunk(generationId, usage);
+        }
+
+        JsonObject json;
+        try {
+            json = JsonParser.parseString(data).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("OpenRouter stream returned invalid JSON chunk: " + data, e);
+        }
+
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            throw new IOException("OpenRouter stream error: " + string(error, "message", error.toString()));
+        }
+
+        String nextGenerationId = string(json, "id", generationId);
+        JsonObject nextUsage = json.has("usage") && json.get("usage").isJsonObject() ? json.getAsJsonObject("usage") : usage;
+        handleResponsesApiEvent(json, content, progress);
+
+        JsonArray choices = json.getAsJsonArray("choices");
+        if (choices != null) {
+            for (JsonElement choiceElement : choices) {
+                if (!choiceElement.isJsonObject()) {
+                    continue;
+                }
+                JsonObject choice = choiceElement.getAsJsonObject();
+                JsonObject delta = choice.getAsJsonObject("delta");
+                if (delta == null) {
+                    continue;
+                }
+                JsonElement contentElement = delta.get("content");
+                if (contentElement != null && contentElement.isJsonPrimitive()) {
+                    String text = contentElement.getAsString();
+                    if (!text.isEmpty()) {
+                        content.append(text);
+                        progress.output(content.length());
+                    }
+                }
+                JsonArray details = delta.getAsJsonArray("reasoning_details");
+                if (details != null) {
+                    handleReasoningDetails(details, progress);
+                } else if (delta.has("reasoning")) {
+                    JsonElement reasoning = delta.get("reasoning");
+                    if (reasoning != null && reasoning.isJsonPrimitive()) {
+                        progress.hiddenReasoning(reasoning.getAsString().length());
+                    }
+                }
+            }
+        }
+
+        return new StreamChunk(nextGenerationId, nextUsage);
+    }
+
+    private static void handleResponsesApiEvent(JsonObject json, StringBuilder content, StreamProgress progress) {
+        String type = string(json, "type", "");
+        if ("response.output_text.delta".equals(type)) {
+            String delta = string(json, "delta", "");
+            if (!delta.isBlank()) {
+                content.append(delta);
+                progress.output(content.length());
+            }
+        } else if ("response.reasoning.delta".equals(type)) {
+            String delta = string(json, "delta", "");
+            progress.hiddenReasoning(delta.length());
+        } else if ("response.reasoning_summary.delta".equals(type) || "response.reasoning.summary.delta".equals(type)) {
+            progress.reasoningSummary(string(json, "delta", ""));
+        }
+    }
+
+    private static void handleReasoningDetails(JsonArray details, StreamProgress progress) {
+        for (JsonElement detailElement : details) {
+            if (!detailElement.isJsonObject()) {
+                continue;
+            }
+            JsonObject detail = detailElement.getAsJsonObject();
+            String type = string(detail, "type", "");
+            String summary = reasoningSummary(detail, type);
+            if (!summary.isBlank()) {
+                progress.reasoningSummary(summary);
+                continue;
+            }
+            if ("reasoning.text".equals(type) || detail.has("text")) {
+                progress.hiddenReasoning(string(detail, "text", "").length());
+            }
+        }
+    }
+
+    private static String reasoningSummary(JsonObject detail, String type) {
+        if (!type.contains("summary") && !detail.has("summary")) {
+            return "";
+        }
+        JsonElement summary = detail.get("summary");
+        if (summary == null || summary.isJsonNull()) {
+            return "";
+        }
+        if (summary.isJsonPrimitive()) {
+            return summary.getAsString();
+        }
+        if (summary.isJsonArray()) {
+            StringBuilder builder = new StringBuilder();
+            for (JsonElement element : summary.getAsJsonArray()) {
+                if (element.isJsonPrimitive()) {
+                    if (!builder.isEmpty()) {
+                        builder.append(' ');
+                    }
+                    builder.append(element.getAsString());
+                }
+            }
+            return builder.toString();
+        }
+        return "";
+    }
+
+    private static String readBody(InputStream body) throws IOException {
+        return new String(body.readAllBytes(), StandardCharsets.UTF_8);
     }
 
     private static String usageSummaryFromResponse(JsonObject json, String generationId) {
@@ -317,7 +481,90 @@ public final class OpenRouterClient {
         return value != null && value.isJsonPrimitive() && !value.isJsonNull() && value.getAsBoolean();
     }
 
+    private static final class StreamProgress {
+        private static final long MESSAGE_INTERVAL_NANOS = Duration.ofSeconds(4).toNanos();
+        private static final int OUTPUT_CHAR_INTERVAL = 2400;
+        private static final int REASONING_CHAR_INTERVAL = 2500;
+
+        private final Consumer<String> progress;
+        private final StringBuilder summaryBuffer = new StringBuilder();
+        private long lastMessage = System.nanoTime();
+        private int lastOutputChars = 0;
+        private int hiddenReasoningChars = 0;
+        private int lastReasoningChars = 0;
+        private boolean announcedHiddenReasoning = false;
+
+        private StreamProgress(Consumer<String> progress) {
+            this.progress = progress;
+        }
+
+        private void reasoningSummary(String text) {
+            if (text == null || text.isBlank()) {
+                return;
+            }
+            summaryBuffer.append(text.replaceAll("\\s+", " "));
+            if (summaryBuffer.length() >= 180 || summaryBuffer.toString().matches(".*[.!?]\\s*$")) {
+                send("OpenRouter reasoning summary: " + trim(summaryBuffer.toString(), 220));
+                summaryBuffer.setLength(0);
+            }
+        }
+
+        private void hiddenReasoning(int charCount) {
+            hiddenReasoningChars += Math.max(0, charCount);
+            long now = System.nanoTime();
+            if (!announcedHiddenReasoning) {
+                announcedHiddenReasoning = true;
+                lastMessage = now;
+                progress.accept("OpenRouter: model is reasoning. Raw hidden chain-of-thought is not shown; summaries are shown when the provider sends them.");
+                return;
+            }
+            if (hiddenReasoningChars - lastReasoningChars >= REASONING_CHAR_INTERVAL && now - lastMessage >= MESSAGE_INTERVAL_NANOS) {
+                lastReasoningChars = hiddenReasoningChars;
+                lastMessage = now;
+                progress.accept("OpenRouter: still reasoning...");
+            }
+        }
+
+        private void output(int outputChars) {
+            long now = System.nanoTime();
+            if (outputChars - lastOutputChars >= OUTPUT_CHAR_INTERVAL && now - lastMessage >= MESSAGE_INTERVAL_NANOS) {
+                lastOutputChars = outputChars;
+                lastMessage = now;
+                progress.accept("OpenRouter: receiving build code (" + outputChars + " chars)...");
+            }
+        }
+
+        private void finish(int outputChars) {
+            if (!summaryBuffer.isEmpty()) {
+                send("OpenRouter reasoning summary: " + trim(summaryBuffer.toString(), 220));
+                summaryBuffer.setLength(0);
+            }
+            progress.accept("OpenRouter: stream complete, received " + outputChars + " chars.");
+        }
+
+        private void send(String message) {
+            lastMessage = System.nanoTime();
+            progress.accept(message);
+        }
+
+        private static String trim(String text, int maxChars) {
+            String compact = text.replaceAll("\\s+", " ").trim();
+            return compact.length() <= maxChars ? compact : compact.substring(0, maxChars - 3) + "...";
+        }
+    }
+
     private record GenerationUsage(String summary, boolean hasCost) {
+    }
+
+    private record StreamingResult(String text, String generationId, JsonObject usage) {
+        private JsonObject usageWrapper() {
+            JsonObject wrapper = new JsonObject();
+            wrapper.add("usage", usage);
+            return wrapper;
+        }
+    }
+
+    private record StreamChunk(String generationId, JsonObject usage) {
     }
 
     public record UsageReport(String summary, String costSummary, boolean hasCost) {

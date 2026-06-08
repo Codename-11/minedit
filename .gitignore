@@ -32,6 +32,16 @@ bin/
 
 ### Node ###
 node_modules/
+.minedit-agent-previews/
+
+### Local secrets and debug output ###
+.env
+.env.*
+*.log
+config/minedit.properties
+config/aibuilder.properties
+config/minedit-debug/
+hs_err_pid*
 
 ### Mac OS ###
 .DS_Store
