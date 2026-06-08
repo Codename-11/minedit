@@ -695,7 +695,7 @@ function agentDeveloperInstructions() {
     "Interpret the requested build type first. House/interior/stair/furniture rules apply to enterable structures; for statues, monuments, fountains, vehicles, terrain, pixel art, and decorative objects, focus on silhouette, surface detail, support, lighting, and prompt accuracy instead of forcing rooms or doors.",
     "For stairs, facing is the high/full/back side. Entrance steps, awnings, and roof rows usually face toward the building wall or roof ridge, not toward the outside edge.",
     "Vertical access must be usable: stairs need enough run, clear headroom, a reachable bottom approach, and a reachable top landing; if that does not fit, use ladders, exterior stair towers, or fewer floors instead. Use spiral stairs only with a true 3x3+ shaft, clear turn space, landings, and player headroom over every step.",
-    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too.",
+    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too. Doors occupy y=D and y=D+1; the header row at y=D+2 must be filled across the full door width unless the prompt wants an open ruin.",
     "Connector blocks like glass panes, iron bars, fences, walls, and chains are fine, but must be visually connected with same-level neighbors, frames, or explicit connection states; do not leave tiny isolated slivers in mostly-air openings.",
     "Do not ask the user questions. Do not use markdown in final code. Do not use OS commands unless explicitly required by the user.",
     "Return only one JavaScript function named build when asked for code.",
@@ -713,7 +713,7 @@ function agentToolDeveloperInstructions() {
     "Interpret the requested build type first. House/interior/stair/furniture rules apply to enterable structures; for statues, monuments, fountains, vehicles, terrain, pixel art, and decorative objects, focus on silhouette, surface detail, support, lighting, and prompt accuracy instead of forcing rooms or doors.",
     "For stairs, facing is the high/full/back side. Entrance steps, awnings, and roof rows usually face toward the building wall or roof ridge, not toward the outside edge.",
     "Vertical access must be usable: stairs need enough run, clear headroom, a reachable bottom approach, and a reachable top landing; if that does not fit, use ladders, exterior stair towers, or fewer floors instead. Use spiral stairs only with a true 3x3+ shaft, clear turn space, landings, and player headroom over every step.",
-    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too.",
+    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too. Doors occupy y=D and y=D+1; the header row at y=D+2 must be filled across the full door width unless the prompt wants an open ruin.",
     "Connector blocks like glass panes, iron bars, fences, walls, and chains are fine, but must be visually connected with same-level neighbors, frames, or explicit connection states; do not leave tiny isolated slivers in mostly-air openings.",
     "Keep acting until the build is coherent, detailed, lit, navigable, and matches the user request, then call minedit.finish_build and provide a concise final message.",
     "Do not ask the user questions. Do not use OS commands. Do not output raw build code as your final answer.",
@@ -729,7 +729,7 @@ Agent mode:
 - Do not use api.replaceLine or api.clearLine; this is build mode on a blank cleared footprint.
 - Interpret the build type first: use interior/door/stair/furniture rules for enterable structures, but for statues, monuments, fountains, vehicles, terrain features, pixel art, or decorative objects focus on silhouette, support, lighting, surface detail, and prompt accuracy.
 - Use comfortable interior scale by default: 3 clear air blocks above walkable floors, no unusably tiny furnished rooms, full-height supports, and unobstructed window views.
-- If the build is enterable, cap doorways intentionally and give upper floors/lofts/towers their own lighting and decoration, not just the ground floor.
+- If the build is enterable, cap doorways intentionally and give upper floors/lofts/towers their own lighting and decoration, not just the ground floor. Doors occupy y=D and y=D+1; fill the header row at y=D+2 across the full door width with a lintel/beam/wall/trim or a framed connected transom.
 - Make vertical access usable: every stair/ladder needs a reachable bottom, reachable top, clear headroom, and enough space. Use ladders/exterior stairs when normal stairs do not fit; use spiral stairs only with a real 3x3+ shaft, clear turn space, landings, and player headroom over every step.
 - Place glass panes, fences, walls, iron bars, and chains with same-level neighbors, frames, or explicit connection states so they connect visibly; do not leave tiny isolated slivers in mostly-air openings.
 - Return raw JavaScript only.`;
@@ -755,7 +755,7 @@ Tool-driven Minedit agent mode:
 - Interior scale rule: normal rooms/halls need at least 3 clear air blocks above the walkable floor. If floor is y=F, keep y=F+1..F+3 clear over standing/walking areas and put ceilings/beams/upper floors at y=F+4 or higher.
 - Room usability rule: avoid furnished micro-rooms. Use at least 4x4 clear interior area for normal rooms, preferably 5x5+. If a space is smaller, make it storage/alcove detail instead of forcing a table/bed/chairs into it.
 - Decoration distribution rule: for enterable builds, every floor/loft/tower level needs its own lights and several fitting details. Do not make a strong lower floor and leave upper rooms mostly bare or dark.
-- Door header rule: cap door openings with an intentional lintel, arch, beam, transom, awning, or matching trim. Do not leave accidental air gaps above doors.
+- Door header rule: doors occupy y=D and y=D+1. Fill y=D+2 across the full door width with a lintel, arch, beam, transom, awning, or matching trim. Do not clear y=D+2 for a doorway unless you immediately refill it; double doors need both header cells filled.
 - Connector block rule: glass panes, iron bars, fences, walls, and chains must be visually connected with same-level neighbors, frames, or explicit connection states. For panes on a fixed-z wall, use east/west connections; for panes on a fixed-x wall, use north/south connections. Do not leave tiny isolated slivers in mostly-air openings.
 - Window rule: do not block glass/panes with solid blocks, shelves, posts, furniture, or decor. Sills/window boxes go below the glass, not across the view.
 - Support rule: pillars/posts should reach the beam, ceiling, upper floor, porch roof, or roof they support; do not leave them one or two blocks too low unless they are obvious railings.
@@ -879,7 +879,7 @@ ${originalPrompt}
 Validator and preview report:
 ${report}
 
-Review the image and the report. Improve the build if it looks sparse, ugly, incorrectly shaped, has weird roof orientation, air gaps, isolated pane/fence/wall slivers, unsupported decorations, fluid overflow risk, bad scale, or misses the user's prompt. Keep what is already good. You may rewrite the function if that is cleaner.
+Review the image and the report. Improve the build if it looks sparse, ugly, incorrectly shaped, has weird roof orientation, missing door headers/lintels directly above upper door halves, air gaps, isolated pane/fence/wall slivers, unsupported decorations, fluid overflow risk, bad scale, or misses the user's prompt. Keep what is already good. You may rewrite the function if that is cleaner.
 
 Current draft code:
 ${currentCode}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+### Changed
+
+- Door-header prompts are now explicit about Minecraft door height: doors occupy two blocks, and the row directly above the upper door half must be filled with a lintel, beam, wall/trim, or deliberately framed transom.
+- Build, staged build, and Codex agent prompts now call out the exact bad pattern where a doorway is cleared through the header row and then only the two door blocks are replaced.
+
 ## 1.3.0
 
 ### Added
