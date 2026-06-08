@@ -1,6 +1,7 @@
 package com.angel.aibuilder.openrouter;
 
 import com.angel.aibuilder.ai.AiCompletion;
+import com.angel.aibuilder.ai.CancellationToken;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -31,16 +32,21 @@ public final class OpenRouterClient {
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt) throws IOException, InterruptedException {
-        return complete(apiKey, model, effort, prompt, ignored -> {
+        return complete(apiKey, model, effort, prompt, true, new CancellationToken(), ignored -> {
         });
     }
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt, Consumer<String> progress) throws IOException, InterruptedException {
+        return complete(apiKey, model, effort, prompt, true, new CancellationToken(), progress);
+    }
+
+    public AiCompletion complete(String apiKey, String model, String effort, String prompt, boolean stream, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
+        token.throwIfCancelled();
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0.25);
         body.addProperty("reasoning_effort", effort);
-        body.addProperty("stream", true);
+        body.addProperty("stream", stream);
         JsonObject reasoning = new JsonObject();
         reasoning.addProperty("effort", effort);
         body.add("reasoning", reasoning);
@@ -61,20 +67,39 @@ public final class OpenRouterClient {
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
                 .build();
 
+        if (!stream) {
+            progress.accept("OpenRouter: waiting for non-stream response...");
+            return completeNonStreaming(apiKey, request, token);
+        }
+
         HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        token.throwIfCancelled();
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("OpenRouter returned HTTP " + response.statusCode() + ": " + readBody(response.body()));
         }
 
         progress.accept("OpenRouter: stream connected.");
         String headerGenerationId = response.headers().firstValue("X-Generation-Id").orElse("");
-        StreamingResult streaming = readStreamingResponse(response.body(), progress, headerGenerationId);
+        InputStream bodyStream = response.body();
+        token.register(bodyStream);
+        StreamingResult streaming;
+        try {
+            streaming = readStreamingResponse(bodyStream, progress, headerGenerationId, token);
+        } catch (IOException e) {
+            if (token.isCancelled()) {
+                throw new InterruptedException("Minedit job was stopped.");
+            }
+            throw e;
+        } finally {
+            token.unregister(bodyStream);
+        }
         String text = streaming.text();
         if (text.isBlank()) {
             throw new IOException("OpenRouter streamed no assistant content.");
         }
 
         String generationId = streaming.generationId();
+        token.throwIfCancelled();
         Optional<GenerationUsage> generationUsage = pollGenerationUsage(apiKey, generationId, 3, Duration.ofMillis(750));
         if (generationUsage.isPresent() && generationUsage.get().hasCost()) {
             return new AiCompletion(text, generationUsage.get().summary(), "");
@@ -83,6 +108,43 @@ public final class OpenRouterClient {
         String usageSummary = streaming.usage() == null
                 ? (generationId.isBlank() ? "" : "OpenRouter usage: unavailable for " + generationId + ".")
                 : usageSummaryFromResponse(streaming.usageWrapper(), generationId);
+        return new AiCompletion(text, usageSummary, generationId);
+    }
+
+    private AiCompletion completeNonStreaming(String apiKey, HttpRequest request, CancellationToken token) throws IOException, InterruptedException {
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        token.throwIfCancelled();
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("OpenRouter returned HTTP " + response.statusCode() + ": " + response.body());
+        }
+
+        JsonObject json;
+        try {
+            json = JsonParser.parseString(response.body()).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("OpenRouter returned invalid JSON.", e);
+        }
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            throw new IOException("OpenRouter error: " + string(error, "message", error.toString()));
+        }
+
+        String text = assistantText(json);
+        if (text.isBlank()) {
+            throw new IOException("OpenRouter returned no assistant content.");
+        }
+
+        String generationId = string(json, "id", "");
+        token.throwIfCancelled();
+        Optional<GenerationUsage> generationUsage = pollGenerationUsage(apiKey, generationId, 3, Duration.ofMillis(750));
+        if (generationUsage.isPresent() && generationUsage.get().hasCost()) {
+            return new AiCompletion(text, generationUsage.get().summary(), "");
+        }
+
+        JsonObject usage = json.has("usage") && json.get("usage").isJsonObject() ? json.getAsJsonObject("usage") : null;
+        String usageSummary = usage == null
+                ? (generationId.isBlank() ? "" : "OpenRouter usage: unavailable for " + generationId + ".")
+                : usageSummaryFromResponse(wrapUsage(usage), generationId);
         return new AiCompletion(text, usageSummary, generationId);
     }
 
@@ -158,7 +220,7 @@ public final class OpenRouterClient {
         return Optional.empty();
     }
 
-    private static StreamingResult readStreamingResponse(InputStream body, Consumer<String> progress, String initialGenerationId) throws IOException {
+    private static StreamingResult readStreamingResponse(InputStream body, Consumer<String> progress, String initialGenerationId, CancellationToken token) throws IOException, InterruptedException {
         StringBuilder content = new StringBuilder();
         StringBuilder eventData = new StringBuilder();
         StreamProgress streamProgress = new StreamProgress(progress);
@@ -168,6 +230,7 @@ public final class OpenRouterClient {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                token.throwIfCancelled();
                 if (line.isBlank()) {
                     StreamChunk chunk = processEventData(eventData, content, generationId, usage, streamProgress);
                     generationId = chunk.generationId();
@@ -182,6 +245,7 @@ public final class OpenRouterClient {
             }
         }
 
+        token.throwIfCancelled();
         StreamChunk chunk = processEventData(eventData, content, generationId, usage, streamProgress);
         generationId = chunk.generationId();
         usage = chunk.usage();
@@ -310,6 +374,85 @@ public final class OpenRouterClient {
 
     private static String readBody(InputStream body) throws IOException {
         return new String(body.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static String assistantText(JsonObject json) {
+        JsonArray choices = json.getAsJsonArray("choices");
+        if (choices != null) {
+            for (JsonElement choiceElement : choices) {
+                if (!choiceElement.isJsonObject()) {
+                    continue;
+                }
+                JsonObject choice = choiceElement.getAsJsonObject();
+                JsonObject message = choice.getAsJsonObject("message");
+                if (message == null) {
+                    continue;
+                }
+                String text = contentText(message.get("content"));
+                if (!text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+
+        JsonArray output = json.getAsJsonArray("output");
+        if (output != null) {
+            StringBuilder builder = new StringBuilder();
+            for (JsonElement itemElement : output) {
+                if (!itemElement.isJsonObject()) {
+                    continue;
+                }
+                JsonObject item = itemElement.getAsJsonObject();
+                JsonArray content = item.getAsJsonArray("content");
+                if (content == null) {
+                    continue;
+                }
+                for (JsonElement contentElement : content) {
+                    if (!contentElement.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject part = contentElement.getAsJsonObject();
+                    String text = string(part, "text", "");
+                    if (!text.isBlank()) {
+                        builder.append(text);
+                    }
+                }
+            }
+            if (!builder.isEmpty()) {
+                return builder.toString();
+            }
+        }
+
+        return string(json, "text", "");
+    }
+
+    private static String contentText(JsonElement content) {
+        if (content == null || content.isJsonNull()) {
+            return "";
+        }
+        if (content.isJsonPrimitive()) {
+            return content.getAsString();
+        }
+        if (!content.isJsonArray()) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (JsonElement partElement : content.getAsJsonArray()) {
+            if (partElement.isJsonPrimitive()) {
+                builder.append(partElement.getAsString());
+            } else if (partElement.isJsonObject()) {
+                JsonObject part = partElement.getAsJsonObject();
+                builder.append(string(part, "text", ""));
+            }
+        }
+        return builder.toString();
+    }
+
+    private static JsonObject wrapUsage(JsonObject usage) {
+        JsonObject wrapper = new JsonObject();
+        wrapper.add("usage", usage);
+        return wrapper;
     }
 
     private static String usageSummaryFromResponse(JsonObject json, String generationId) {

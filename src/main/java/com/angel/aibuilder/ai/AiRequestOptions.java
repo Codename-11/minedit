@@ -1,6 +1,6 @@
 package com.angel.aibuilder.ai;
 
-public record AiRequestOptions(AiProvider provider, String openRouterApiKey, String codexUrl, String model, String effort) {
+public record AiRequestOptions(AiProvider provider, String openRouterApiKey, String codexUrl, String model, String effort, boolean streaming) {
     public String targetDescription() {
         return switch (provider) {
             case OPENROUTER -> model + " via OpenRouter";

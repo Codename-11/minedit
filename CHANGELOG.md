@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+
+- `/streaming enabled|disabled` for OpenRouter streaming control.
+- `/stop` to stop active generation work and queued placement jobs.
+- Cancellation support for OpenRouter streams and Codex local agent jobs.
+
+### Changed
+
+- OpenRouter can now run in non-streaming mode while still reporting usage and cost.
+- Stair orientation prompts now call out that stair `facing` is the high/full/back side, so entrance steps, awnings, and roof rows should usually face toward the building wall or roof ridge.
+- Build prompts now require comfortable interior scale by default: 3 clear air blocks above floors, no unusably tiny furnished rooms, full-height supports, and unobstructed window views.
+- Build prompts now require reachable vertical access: stairs need approach space, landing space, headroom, and enough horizontal run, otherwise models should use ladders, exterior stair towers, or fewer floors.
+- Spiral stair prompts are stricter: models should only use them with a true 3x3+ shaft, clear turn space, landings, and player headroom over every step.
+- Build prompts now classify the requested build type first, so house/interior rules are not forced onto statues, monuments, fountains, vehicles, terrain features, or decorative builds.
+- Door and interior prompts now call out accidental air gaps above doors and under-lit or under-decorated upper floors.
+- Glass pane, fence, wall, iron bar, and chain prompts now require visible connections or explicit connection states instead of isolated slivers in mostly-air openings.
+
 ## 1.2.0
 
 Release-readiness update for public testing.
@@ -17,7 +36,7 @@ Release-readiness update for public testing.
 - OpenRouter streaming progress for builds/edits.
 - OpenRouter usage and cost reporting, including BYOK upstream inference cost when available.
 - `/status` command for provider/model/selection/generation/queue state.
-- README release documentation, warnings, examples, and release checklist.
+- README release documentation, warnings, examples, and usage docs.
 
 ### Changed
 

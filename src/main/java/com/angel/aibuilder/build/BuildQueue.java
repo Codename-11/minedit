@@ -14,8 +14,10 @@ public class BuildQueue {
         BUILDS.add(build);
     }
 
-    public static void cancelBuilds(UUID playerId) {
+    public static int cancelBuilds(UUID playerId) {
+        int before = BUILDS.size();
         BUILDS.removeIf(build -> build.isFor(playerId));
+        return before - BUILDS.size();
     }
 
     public static boolean hasBuildFor(UUID playerId) {

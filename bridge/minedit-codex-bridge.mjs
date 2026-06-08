@@ -310,6 +310,7 @@ function createAgentJob() {
     text: "",
     summary: "",
     error: "",
+    cancel: null,
     startedAt: Date.now(),
     finishedAt: 0,
   };
@@ -354,6 +355,12 @@ function agentBatch(job, code, simulation, summary) {
   }
 }
 
+function assertAgentRunning(job) {
+  if (job.status === "cancelled") {
+    throw new BridgeError(499, "Minedit agent job was stopped.");
+  }
+}
+
 function agentStatusPayload(job, afterSeq, afterBatch = 0) {
   return {
     ok: true,
@@ -363,14 +370,36 @@ function agentStatusPayload(job, afterSeq, afterBatch = 0) {
     batches: job.batches.filter((batch) => batch.id > afterBatch),
     text: job.status === "completed" ? job.text : "",
     summary: job.status === "completed" ? job.summary : "",
-    error: job.status === "failed" ? job.error : "",
+    error: job.status === "failed" || job.status === "cancelled" ? job.error : "",
   };
+}
+
+function cancelAgentJob(jobId) {
+  cleanupAgentJobs();
+  const job = AGENT_JOBS.get(jobId);
+  if (!job) {
+    throw new BridgeError(404, "Unknown Minedit agent job id.");
+  }
+  if (job.status !== "running") {
+    return { ok: true, jobId: job.id, status: job.status };
+  }
+  job.status = "cancelled";
+  job.error = "Stopped by Minecraft /stop.";
+  job.finishedAt = Date.now();
+  agentEvent(job, "Minedit agent: stopped by Minecraft /stop.");
+  if (typeof job.cancel === "function") {
+    job.cancel();
+  }
+  return { ok: true, jobId: job.id, status: job.status };
 }
 
 function startAgentBuild(body) {
   const job = createAgentJob();
   agentEvent(job, "Minedit agent: job accepted by Codex bridge.");
   runAgentBuildJob(job, body).catch((error) => {
+    if (job.status === "cancelled") {
+      return;
+    }
     job.status = "failed";
     job.error = error.message || "Codex agent build failed.";
     job.finishedAt = Date.now();
@@ -383,6 +412,9 @@ function startAgentStepByStepBuild(body) {
   const job = createAgentJob();
   agentEvent(job, "Minedit tool agent: job accepted by Codex bridge.");
   runAgentStepByStepBuildJob(job, body).catch((error) => {
+    if (job.status === "cancelled") {
+      return;
+    }
     job.status = "failed";
     job.error = error.message || "Codex step-by-step agent build failed.";
     job.finishedAt = Date.now();
@@ -392,6 +424,7 @@ function startAgentStepByStepBuild(body) {
 }
 
 async function runAgentBuildJob(job, body) {
+  assertAgentRunning(job);
   const prompt = body?.prompt;
   const model = body?.model;
   const effort = body?.effort;
@@ -412,6 +445,9 @@ async function runAgentBuildJob(job, body) {
 
   await fs.mkdir(PREVIEW_DIR, { recursive: true });
   await withSession(async (session) => {
+    job.cancel = () => session.close();
+    try {
+    assertAgentRunning(job);
     agentEvent(job, "Minedit agent: checking Codex login and model availability...");
     const account = await readAccount(session);
     if (account?.requiresOpenaiAuth && !account?.account) {
@@ -448,16 +484,19 @@ async function runAgentBuildJob(job, body) {
     }
 
     attachAgentProgress(session, threadId, job);
+    assertAgentRunning(job);
     agentEvent(job, `Minedit agent: generating initial draft with ${modelToUse} (${effort})...`);
     let text = await runCodexTurn(session, threadId, modelToUse, effort, [
       { type: "text", text: agentInitialPrompt(prompt) },
     ]);
     let code = extractCodeFromText(text);
     let simulation = simulateBuildCode(code, width, depth);
+    assertAgentRunning(job);
     agentEvent(job, `Minedit agent: draft generated, ${simulation.stats.operationCount} operations, ${simulation.stats.nonAirBlocks} preview blocks.`);
 
     let revision = 1;
     while (revision <= AGENT_MAX_REVISIONS) {
+      assertAgentRunning(job);
       const preview = await renderPreviewPng(simulation, width, depth, `${job.id}-preview-${revision}.png`);
       const report = validationReport(simulation);
       agentEvent(job, `Minedit agent: rendered preview ${revision}: ${path.basename(preview.path)}.`);
@@ -474,6 +513,7 @@ async function runAgentBuildJob(job, body) {
       ]);
       code = extractCodeFromText(text);
       simulation = simulateBuildCode(code, width, depth);
+      assertAgentRunning(job);
       agentEvent(job, `Minedit agent: revision ${revision} returned, ${simulation.stats.operationCount} operations, ${simulation.stats.nonAirBlocks} preview blocks.`);
 
       if (!hasSevereIssues(simulation)) {
@@ -482,16 +522,21 @@ async function runAgentBuildJob(job, body) {
       revision++;
     }
 
+    assertAgentRunning(job);
     const finalPreview = await renderPreviewPng(simulation, width, depth, `${job.id}-final.png`);
     job.text = code;
     job.summary = `Minedit agent: final preview ${path.basename(finalPreview.path)}, ${simulation.stats.nonAirBlocks} preview blocks, ${simulation.issues.length} validation notes.`;
     job.status = "completed";
     job.finishedAt = Date.now();
     agentEvent(job, job.summary);
+    } finally {
+      job.cancel = null;
+    }
   });
 }
 
 async function runAgentStepByStepBuildJob(job, body) {
+  assertAgentRunning(job);
   const prompt = body?.prompt;
   const model = body?.model;
   const effort = body?.effort;
@@ -512,6 +557,9 @@ async function runAgentStepByStepBuildJob(job, body) {
 
   await fs.mkdir(PREVIEW_DIR, { recursive: true });
   await withSession(async (session) => {
+    job.cancel = () => session.close();
+    try {
+    assertAgentRunning(job);
     agentEvent(job, "Minedit tool agent: checking Codex login and model availability...");
     const account = await readAccount(session);
     if (account?.requiresOpenaiAuth && !account?.account) {
@@ -556,6 +604,7 @@ async function runAgentStepByStepBuildJob(job, body) {
     let finishSummary = "";
 
     session.registerDynamicToolHandler(threadId, async (params) => {
+      assertAgentRunning(job);
       const rawTool = params.tool || "";
       const tool = rawTool.startsWith("minedit.") ? rawTool.slice("minedit.".length) : rawTool;
       const namespace = params.namespace || "";
@@ -615,6 +664,7 @@ async function runAgentStepByStepBuildJob(job, body) {
     });
 
     try {
+      assertAgentRunning(job);
       agentEvent(job, `Minedit tool agent: starting one Codex agent turn with ${modelToUse} (${effort})...`);
       const text = await runCodexTurn(session, threadId, modelToUse, effort, [
         { type: "text", text: agentToolInitialPrompt(prompt, width, depth) },
@@ -628,6 +678,10 @@ async function runAgentStepByStepBuildJob(job, body) {
       agentEvent(job, job.summary);
     } finally {
       session.unregisterDynamicToolHandler(threadId);
+      job.cancel = null;
+    }
+    } finally {
+      job.cancel = null;
     }
   });
 }
@@ -638,6 +692,11 @@ function agentDeveloperInstructions() {
     "Your only deliverable is Rhino-compatible JavaScript defining function build(api).",
     "The bridge will execute your build(api) function in a simulator, render local preview images, and send them back for visual review.",
     "Use the previews to improve shape, detail, scale, roof orientation, fluid containment, supports, and obvious Minecraft mistakes.",
+    "Interpret the requested build type first. House/interior/stair/furniture rules apply to enterable structures; for statues, monuments, fountains, vehicles, terrain, pixel art, and decorative objects, focus on silhouette, surface detail, support, lighting, and prompt accuracy instead of forcing rooms or doors.",
+    "For stairs, facing is the high/full/back side. Entrance steps, awnings, and roof rows usually face toward the building wall or roof ridge, not toward the outside edge.",
+    "Vertical access must be usable: stairs need enough run, clear headroom, a reachable bottom approach, and a reachable top landing; if that does not fit, use ladders, exterior stair towers, or fewer floors instead. Use spiral stairs only with a true 3x3+ shaft, clear turn space, landings, and player headroom over every step.",
+    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too.",
+    "Connector blocks like glass panes, iron bars, fences, walls, and chains are fine, but must be visually connected with same-level neighbors, frames, or explicit connection states; do not leave tiny isolated slivers in mostly-air openings.",
     "Do not ask the user questions. Do not use markdown in final code. Do not use OS commands unless explicitly required by the user.",
     "Return only one JavaScript function named build when asked for code.",
   ].join(" ");
@@ -651,6 +710,11 @@ function agentToolDeveloperInstructions() {
     "Keep placement steps narrow and legible: foundation, floor, walls, openings, roof frame, roof detail, lighting, furniture, exterior detail, landscaping, correction.",
     "Do not combine the whole building into one or two giant tool calls. A normal build should use many small placement steps.",
     "Call minedit.render_preview or minedit.inspect_status between major phases before deciding the next action.",
+    "Interpret the requested build type first. House/interior/stair/furniture rules apply to enterable structures; for statues, monuments, fountains, vehicles, terrain, pixel art, and decorative objects, focus on silhouette, surface detail, support, lighting, and prompt accuracy instead of forcing rooms or doors.",
+    "For stairs, facing is the high/full/back side. Entrance steps, awnings, and roof rows usually face toward the building wall or roof ridge, not toward the outside edge.",
+    "Vertical access must be usable: stairs need enough run, clear headroom, a reachable bottom approach, and a reachable top landing; if that does not fit, use ladders, exterior stair towers, or fewer floors instead. Use spiral stairs only with a true 3x3+ shaft, clear turn space, landings, and player headroom over every step.",
+    "Default interiors should be comfortable, not merely passable: keep at least 3 clear air blocks above walkable floors, avoid tiny furnished rooms below 4x4 clear interior area, make support posts reach the beams/ceilings they support, keep window views unobstructed, cap doorways intentionally, and give upper floors lighting and decoration too.",
+    "Connector blocks like glass panes, iron bars, fences, walls, and chains are fine, but must be visually connected with same-level neighbors, frames, or explicit connection states; do not leave tiny isolated slivers in mostly-air openings.",
     "Keep acting until the build is coherent, detailed, lit, navigable, and matches the user request, then call minedit.finish_build and provide a concise final message.",
     "Do not ask the user questions. Do not use OS commands. Do not output raw build code as your final answer.",
   ].join(" ");
@@ -663,6 +727,11 @@ Agent mode:
 - Produce the first complete draft of build(api).
 - The bridge will render it into a local image and send it back to you for visual review.
 - Do not use api.replaceLine or api.clearLine; this is build mode on a blank cleared footprint.
+- Interpret the build type first: use interior/door/stair/furniture rules for enterable structures, but for statues, monuments, fountains, vehicles, terrain features, pixel art, or decorative objects focus on silhouette, support, lighting, surface detail, and prompt accuracy.
+- Use comfortable interior scale by default: 3 clear air blocks above walkable floors, no unusably tiny furnished rooms, full-height supports, and unobstructed window views.
+- If the build is enterable, cap doorways intentionally and give upper floors/lofts/towers their own lighting and decoration, not just the ground floor.
+- Make vertical access usable: every stair/ladder needs a reachable bottom, reachable top, clear headroom, and enough space. Use ladders/exterior stairs when normal stairs do not fit; use spiral stairs only with a real 3x3+ shaft, clear turn space, landings, and player headroom over every step.
+- Place glass panes, fences, walls, iron bars, and chains with same-level neighbors, frames, or explicit connection states so they connect visibly; do not leave tiny isolated slivers in mostly-air openings.
 - Return raw JavaScript only.`;
 }
 
@@ -679,7 +748,17 @@ Tool-driven Minedit agent mode:
 - Prefer roughly 3-12 high-level api calls per placement step. A single fill may cover a whole floor or wall plane; that is fine.
 - Do not use api.replaceLine or api.clearLine; this is build mode on a blank cleared footprint.
 - Avoid repeating previous blocks unless you are intentionally correcting or replacing them.
-- Check previews for weak shape, sparse walls, empty interiors, bad door orientation, blocked paths, roof gaps/inversion, unsupported decorations, bad slab/trapdoor/fence orientation, and fluid overflow.
+- Interpret the build type first: use interior/door/stair/furniture rules for enterable structures, but for statues, monuments, fountains, vehicles, terrain features, pixel art, or decorative objects focus on silhouette, support, lighting, surface detail, and prompt accuracy.
+- Check previews for weak shape, sparse walls, empty interiors, under-decorated upper floors, unlit upper floors, bad door orientation, accidental air gaps above doors, blocked paths, roof gaps/inversion, backwards entrance/roof stairs, unsupported decorations, bad slab/trapdoor/fence orientation, and fluid overflow.
+- Stair facing rule: facing is the high/full/back side. Entrance steps, exterior awnings, and roof rows usually face toward the building wall or roof ridge/center; the low/open lip points outward.
+- Vertical access rule: stairs must have enough horizontal run, a reachable bottom approach, a reachable top landing connected to a floor, and clear headroom along the route. If normal stairs would block the room or become unreachable, use a ladder shaft, exterior stair tower, or fewer floors. Spiral stairs are only acceptable with a true 3x3+ shaft, clear turn space, landings, and 3 clear air blocks above every step.
+- Interior scale rule: normal rooms/halls need at least 3 clear air blocks above the walkable floor. If floor is y=F, keep y=F+1..F+3 clear over standing/walking areas and put ceilings/beams/upper floors at y=F+4 or higher.
+- Room usability rule: avoid furnished micro-rooms. Use at least 4x4 clear interior area for normal rooms, preferably 5x5+. If a space is smaller, make it storage/alcove detail instead of forcing a table/bed/chairs into it.
+- Decoration distribution rule: for enterable builds, every floor/loft/tower level needs its own lights and several fitting details. Do not make a strong lower floor and leave upper rooms mostly bare or dark.
+- Door header rule: cap door openings with an intentional lintel, arch, beam, transom, awning, or matching trim. Do not leave accidental air gaps above doors.
+- Connector block rule: glass panes, iron bars, fences, walls, and chains must be visually connected with same-level neighbors, frames, or explicit connection states. For panes on a fixed-z wall, use east/west connections; for panes on a fixed-x wall, use north/south connections. Do not leave tiny isolated slivers in mostly-air openings.
+- Window rule: do not block glass/panes with solid blocks, shelves, posts, furniture, or decor. Sills/window boxes go below the glass, not across the view.
+- Support rule: pillars/posts should reach the beam, ceiling, upper floor, porch roof, or roof they support; do not leave them one or two blocks too low unless they are obvious railings.
 - When you are satisfied, call minedit.finish_build with a short summary, then answer briefly.`;
 }
 
@@ -800,7 +879,7 @@ ${originalPrompt}
 Validator and preview report:
 ${report}
 
-Review the image and the report. Improve the build if it looks sparse, ugly, incorrectly shaped, has weird roof orientation, air gaps, unsupported decorations, fluid overflow risk, bad scale, or misses the user's prompt. Keep what is already good. You may rewrite the function if that is cleaner.
+Review the image and the report. Improve the build if it looks sparse, ugly, incorrectly shaped, has weird roof orientation, air gaps, isolated pane/fence/wall slivers, unsupported decorations, fluid overflow risk, bad scale, or misses the user's prompt. Keep what is already good. You may rewrite the function if that is cleaner.
 
 Current draft code:
 ${currentCode}
@@ -1602,6 +1681,11 @@ async function handle(req, res) {
     sendJson(res, 200, startAgentStepByStepBuild(body));
     return;
   }
+  if (req.method === "POST" && url.pathname === "/agent-build/cancel") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, cancelAgentJob(String(body?.jobId || "")));
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/agent-build/status") {
     const jobId = url.searchParams.get("id") || "";
     const afterSeq = Number(url.searchParams.get("after") || 0);
@@ -1617,7 +1701,7 @@ async function handle(req, res) {
     ));
     return;
   }
-  sendJson(res, 404, { ok: false, error: "Not found. Use GET /status, POST /complete, POST /agent-build/start, POST /agent-build/step-by-step/start, or GET /agent-build/status." });
+  sendJson(res, 404, { ok: false, error: "Not found. Use GET /status, POST /complete, POST /agent-build/start, POST /agent-build/step-by-step/start, POST /agent-build/cancel, or GET /agent-build/status." });
 }
 
 const server = http.createServer((req, res) => {

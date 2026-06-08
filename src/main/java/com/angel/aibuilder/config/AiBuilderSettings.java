@@ -48,6 +48,11 @@ public final class AiBuilderSettings {
         return PROPERTIES.getProperty("quick_effort", "low").trim();
     }
 
+    public static synchronized boolean streaming() {
+        load();
+        return Boolean.parseBoolean(PROPERTIES.getProperty("streaming", "true").trim());
+    }
+
     public static synchronized void setApiKey(String key) throws IOException {
         load();
         PROPERTIES.setProperty("openrouter_api_key", key.trim());
@@ -81,6 +86,12 @@ public final class AiBuilderSettings {
     public static synchronized void setQuickEffort(String effort) throws IOException {
         load();
         PROPERTIES.setProperty("quick_effort", effort.trim());
+        save();
+    }
+
+    public static synchronized void setStreaming(boolean streaming) throws IOException {
+        load();
+        PROPERTIES.setProperty("streaming", Boolean.toString(streaming));
         save();
     }
 

@@ -26,6 +26,8 @@ import java.util.concurrent.CompletableFuture;
 
 public class AiBuilderCommands {
     private static final Set<String> EFFORTS = Set.of("none", "minimal", "low", "medium", "high", "xhigh");
+    private static final Set<String> ENABLED_VALUES = Set.of("enabled", "enable", "on", "true", "yes");
+    private static final Set<String> DISABLED_VALUES = Set.of("disabled", "disable", "off", "false", "no");
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
     private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
 
@@ -129,6 +131,37 @@ public class AiBuilderCommands {
                             }
                             return 1;
                         })));
+
+        event.getDispatcher().register(Commands.literal("streaming")
+                .then(Commands.argument("enabled", StringArgumentType.word())
+                        .executes(ctx -> {
+                            String value = StringArgumentType.getString(ctx, "enabled").trim().toLowerCase();
+                            Boolean streaming = parseEnabled(value);
+                            if (streaming == null) {
+                                ctx.getSource().sendFailure(Component.literal("Streaming must be enabled or disabled."));
+                                return 0;
+                            }
+                            try {
+                                AiBuilderSettings.setStreaming(streaming);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit OpenRouter streaming " + (streaming ? "enabled" : "disabled") + ".").withStyle(ChatFormatting.GREEN), false);
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save streaming setting: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("stop")
+                .executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    int generationCount = BuildJobService.cancelGenerations(player.getUUID());
+                    int queuedCount = BuildQueue.cancelBuilds(player.getUUID());
+                    if (generationCount == 0 && queuedCount == 0) {
+                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit: nothing active to stop.").withStyle(ChatFormatting.YELLOW), false);
+                    } else {
+                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit: stop requested. Canceled " + generationCount + " active generation(s) and removed " + queuedCount + " queued placement job(s).").withStyle(ChatFormatting.YELLOW), false);
+                    }
+                    return 1;
+                }));
 
         event.getDispatcher().register(Commands.literal("status")
                 .executes(ctx -> {
@@ -341,8 +374,9 @@ public class AiBuilderCommands {
         AiProvider provider = AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER);
         String model = AiBuilderSettings.model();
         String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
+        boolean streaming = AiBuilderSettings.streaming();
         if (provider == AiProvider.CODEX_LOCAL) {
-            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort);
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming);
         }
 
         String apiKey = AiBuilderSettings.apiKey();
@@ -350,7 +384,7 @@ public class AiBuilderCommands {
             source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local."));
             return null;
         }
-        return new AiRequestOptions(provider, apiKey, "", model, effort);
+        return new AiRequestOptions(provider, apiKey, "", model, effort, streaming);
     }
 
     private static void sendStatus(CommandSourceStack source) {
@@ -358,6 +392,7 @@ public class AiBuilderCommands {
         String model = AiBuilderSettings.model();
         String effort = AiBuilderSettings.effort();
         String quickEffort = AiBuilderSettings.quickEffort();
+        boolean streaming = AiBuilderSettings.streaming();
         String codexUrl = AiBuilderSettings.codexUrl();
         boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
 
@@ -366,6 +401,7 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Model: " + model).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Reasoning effort: " + effort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Codex bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
@@ -408,5 +444,15 @@ public class AiBuilderCommands {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    private static Boolean parseEnabled(String value) {
+        if (ENABLED_VALUES.contains(value)) {
+            return true;
+        }
+        if (DISABLED_VALUES.contains(value)) {
+            return false;
+        }
+        return null;
     }
 }

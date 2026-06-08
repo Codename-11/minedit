@@ -178,6 +178,9 @@ Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge s
 /effort medium
 /effort high
 /effort xhigh
+/streaming enabled
+/streaming disabled
+/stop
 /status
 /usage <openrouter-generation-id>
 ```
@@ -189,9 +192,14 @@ provider: openrouter
 model: openai/gpt-5.5
 normal effort: medium
 quick edit effort: low
+OpenRouter streaming: enabled
 ```
 
-`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
+`/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
+
+`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex agent jobs are also cancelled through the local bridge when possible.
+
+`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
 
 Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The Codex bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
@@ -281,7 +289,7 @@ These files may contain your prompts and generated code. They should not contain
 
 ## Notes on Generated Builds
 
-Minedit prompts models to avoid common Minecraft placement problems such as unsupported plants, inverted roofs, stair orientation mistakes, roof gaps, trapped doors, blocked paths, empty rooms, unlit interiors, and fragile blocks without support. It also checks Minecraft block survival rules before placing blocks, so unsupported fragile blocks may be skipped.
+Minedit prompts models to avoid common Minecraft placement problems such as unsupported plants, inverted roofs, stair orientation mistakes, unreachable stairs or ladders, missing landings, roof gaps, trapped doors, accidental gaps above doors, isolated pane/fence/wall slivers, blocked paths, cramped rooms, low ceilings, short support pillars, blocked window views, empty rooms, under-decorated upper floors, unlit interiors, and fragile blocks without support. It also prompts models to treat non-enterable builds such as statues, monuments, fountains, terrain features, vehicles, and decorative objects differently from houses. It also checks Minecraft block survival rules before placing blocks, so unsupported fragile blocks may be skipped.
 
 Model output is still imperfect. Use `/reset build` and world backups while testing.
 
