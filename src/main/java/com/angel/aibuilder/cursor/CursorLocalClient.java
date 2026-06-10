@@ -34,7 +34,8 @@ public final class CursorLocalClient {
         body.addProperty("effort", effort);
         body.addProperty("prompt", prompt);
 
-        JsonObject json = sendJson(endpoint(baseUrl, "/cursor/complete"), "POST", body, Duration.ofMinutes(12));
+        // Slightly longer than the bridge's 90-minute Cursor CLI timeout so its error surfaces first.
+        JsonObject json = sendJson(endpoint(baseUrl, "/cursor/complete"), "POST", body, Duration.ofMinutes(95));
         token.throwIfCancelled();
         JsonElement text = json.get("text");
         if (text == null || !text.isJsonPrimitive()) {
@@ -44,11 +45,11 @@ public final class CursorLocalClient {
     }
 
     public AiCompletion agentBuild(String baseUrl, String model, String effort, String prompt, int width, int depth, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
-        return pollAgentJob(baseUrl, "/cursor/agent-build/start", model, effort, prompt, width, depth, token, progress, null, Duration.ofMinutes(20));
+        return pollAgentJob(baseUrl, "/cursor/agent-build/start", model, effort, prompt, width, depth, token, progress, null, Duration.ofMinutes(180));
     }
 
     public AiCompletion agentStepByStepBuild(String baseUrl, String model, String effort, String prompt, int width, int depth, CancellationToken token, Consumer<String> progress, Consumer<StepBatch> batchConsumer) throws IOException, InterruptedException {
-        return pollAgentJob(baseUrl, "/cursor/agent-build/step-by-step/start", model, effort, prompt, width, depth, token, progress, batchConsumer, Duration.ofMinutes(30));
+        return pollAgentJob(baseUrl, "/cursor/agent-build/step-by-step/start", model, effort, prompt, width, depth, token, progress, batchConsumer, Duration.ofMinutes(270));
     }
 
     public Status status(String baseUrl) throws IOException, InterruptedException {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.1
+
+### Added
+
+- Cursor local bridge provider: `/provider cursor`, `/model list cursor`, and build/edit/staged/agent modes through the Cursor CLI.
+
+### Changed
+
+- Cursor CLI timeout raised from 10 minutes to 90 minutes (override with `MINEDIT_CURSOR_TIMEOUT_MS`).
+- Mod-side Cursor request and agent job timeouts raised to match the longer CLI timeout.
+
 ## 1.5.0
 
 ### Added
