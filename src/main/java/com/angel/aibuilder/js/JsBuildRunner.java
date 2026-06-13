@@ -6,11 +6,11 @@ import com.angel.aibuilder.build.ExistingStructureScanner;
 import com.angel.aibuilder.build.FillOperation;
 import com.angel.aibuilder.build.FillOptions;
 import com.angel.aibuilder.build.SetBlockOperation;
-import com.angel.aibuilder.vendor.rhino.Context;
-import com.angel.aibuilder.vendor.rhino.Function;
-import com.angel.aibuilder.vendor.rhino.NativeObject;
-import com.angel.aibuilder.vendor.rhino.Scriptable;
-import com.angel.aibuilder.vendor.rhino.ScriptableObject;
+import com.angel.aibuilder.vendor.mozilla.javascript.Context;
+import com.angel.aibuilder.vendor.mozilla.javascript.Function;
+import com.angel.aibuilder.vendor.mozilla.javascript.NativeObject;
+import com.angel.aibuilder.vendor.mozilla.javascript.Scriptable;
+import com.angel.aibuilder.vendor.mozilla.javascript.ScriptableObject;
 
 import java.util.HashMap;
 import java.util.Map;

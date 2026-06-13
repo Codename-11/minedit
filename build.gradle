@@ -120,7 +120,7 @@ def relocatedRhinoTask = tasks.register('relocateRhino', com.github.jengelman.gr
     archiveClassifier.set('relocated')
     archiveVersion.set('1.8.0')
     configurations = [project.configurations.rhinoRelocation]
-    relocate 'org.mozilla.javascript', 'com.angel.aibuilder.vendor.rhino'
+    relocate 'org.mozilla', 'com.angel.aibuilder.vendor.mozilla'
     exclude 'module-info.class'
     exclude 'META-INF/versions/**/module-info.class'
     exclude 'META-INF/*.RSA'
