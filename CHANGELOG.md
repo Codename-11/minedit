@@ -5,6 +5,7 @@
 ### Added
 
 - Cursor local bridge provider: `/provider cursor`, `/model list cursor`, and build/edit/staged/agent modes through the Cursor CLI.
+- Codex bridge can now connect to an existing `codex app-server` WebSocket via `MINEDIT_CODEX_APP_SERVER_URL`, while keeping the default spawned app-server mode.
 
 ### Changed
 

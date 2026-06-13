@@ -4,14 +4,19 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import vm from "node:vm";
 import zlib from "node:zlib";
+import WebSocket from "ws";
 
 const HOST = process.env.MINEDIT_BRIDGE_HOST || "127.0.0.1";
 const PORT = Number(process.env.MINEDIT_BRIDGE_PORT || 8765);
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
+const CODEX_APP_SERVER_URL = (process.env.MINEDIT_CODEX_APP_SERVER_URL || "").trim();
+const CODEX_APP_SERVER_TOKEN = (process.env.MINEDIT_CODEX_APP_SERVER_TOKEN || "").trim();
+const CODEX_APP_SERVER_TOKEN_FILE = (process.env.MINEDIT_CODEX_APP_SERVER_TOKEN_FILE || "").trim();
 const CURSOR_BIN = process.env.CURSOR_BIN || "agent";
 const REQUEST_TIMEOUT_MS = Number(process.env.MINEDIT_CODEX_TIMEOUT_MS || 10 * 60 * 1000);
 const CURSOR_TIMEOUT_MS = Number(process.env.MINEDIT_CURSOR_TIMEOUT_MS || 90 * 60 * 1000);
@@ -59,6 +64,33 @@ class BridgeError extends Error {
   }
 }
 
+function spawnCli(command, args, options) {
+  return spawn(command, args, {
+    ...options,
+    shell: options?.shell ?? process.platform === "win32",
+    windowsHide: true,
+  });
+}
+
+function codexAppServerToken() {
+  if (CODEX_APP_SERVER_TOKEN) {
+    return CODEX_APP_SERVER_TOKEN;
+  }
+  if (!CODEX_APP_SERVER_TOKEN_FILE) {
+    return "";
+  }
+  try {
+    return readFileSync(CODEX_APP_SERVER_TOKEN_FILE, "utf8").trim();
+  } catch (error) {
+    throw new BridgeError(502, `Could not read MINEDIT_CODEX_APP_SERVER_TOKEN_FILE '${CODEX_APP_SERVER_TOKEN_FILE}': ${error.message}`);
+  }
+}
+
+function codexAppServerHeaders() {
+  const token = codexAppServerToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 class CodexAppServerSession {
   constructor() {
     this.nextId = 1;
@@ -67,8 +99,20 @@ class CodexAppServerSession {
     this.dynamicToolHandlers = new Map();
     this.stderr = "";
     this.closed = false;
+    this.closing = false;
+    this.proc = null;
+    this.rl = null;
+    this.ws = null;
+    this.transport = CODEX_APP_SERVER_URL ? "websocket" : "stdio";
+    this.target = CODEX_APP_SERVER_URL || `${CODEX_BIN} app-server`;
 
-    this.proc = spawn(CODEX_BIN, ["app-server"], {
+    this.ready = CODEX_APP_SERVER_URL
+      ? this.connectWebSocket(CODEX_APP_SERVER_URL)
+      : this.connectStdio();
+  }
+
+  connectStdio() {
+    this.proc = spawnCli(CODEX_BIN, ["app-server"], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -78,6 +122,9 @@ class CodexAppServerSession {
 
     this.proc.once("exit", (code, signal) => {
       this.closed = true;
+      if (this.closing) {
+        return;
+      }
       this.failAll(new BridgeError(502, `Codex app-server exited unexpectedly (${signal || code}). ${this.stderr}`.trim()));
     });
 
@@ -86,10 +133,92 @@ class CodexAppServerSession {
     });
 
     this.rl = readline.createInterface({ input: this.proc.stdout });
-    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("line", (line) => this.handleMessage(line));
+    return Promise.resolve();
+  }
+
+  connectWebSocket(rawUrl) {
+    let url;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return Promise.reject(new BridgeError(502, `Invalid MINEDIT_CODEX_APP_SERVER_URL '${rawUrl}'. Use ws://host:port or wss://host:port.`));
+    }
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+      return Promise.reject(new BridgeError(502, `Unsupported MINEDIT_CODEX_APP_SERVER_URL '${rawUrl}'. Use ws://host:port or wss://host:port.`));
+    }
+
+    let headers;
+    try {
+      headers = codexAppServerHeaders();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return new Promise((resolve, reject) => {
+      let opened = false;
+      let settled = false;
+      this.ws = new WebSocket(url, Object.keys(headers).length > 0 ? { headers } : {});
+      const connectTimeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.ws.terminate();
+        reject(new BridgeError(504, `Timed out connecting to Codex app-server WebSocket at ${rawUrl}.`));
+      }, RPC_TIMEOUT_MS);
+
+      this.ws.once("open", () => {
+        if (settled) {
+          return;
+        }
+        opened = true;
+        settled = true;
+        clearTimeout(connectTimeout);
+        resolve();
+      });
+
+      this.ws.on("message", (data) => {
+        this.handleMessage(data.toString());
+      });
+
+      this.ws.on("error", (error) => {
+        const bridgeError = new BridgeError(502, `Codex app-server WebSocket error at ${rawUrl}: ${error.message}`);
+        if (!opened) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(connectTimeout);
+          reject(bridgeError);
+          return;
+        }
+        this.failAll(bridgeError);
+      });
+
+      this.ws.once("close", (code, reason) => {
+        this.closed = true;
+        if (this.closing) {
+          return;
+        }
+        const detail = reason && reason.length > 0 ? `: ${reason.toString()}` : "";
+        const bridgeError = new BridgeError(502, `Codex app-server WebSocket at ${rawUrl} closed (${code}${detail}).`);
+        if (!opened) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(connectTimeout);
+          reject(bridgeError);
+          return;
+        }
+        this.failAll(bridgeError);
+      });
+    });
   }
 
   async initialize() {
+    await this.ready;
     await this.request("initialize", {
       clientInfo: {
         name: "minedit_bridge",
@@ -103,7 +232,7 @@ class CodexAppServerSession {
     this.notify("initialized", {});
   }
 
-  handleLine(line) {
+  handleMessage(line) {
     let msg;
     try {
       msg = JSON.parse(line);
@@ -207,7 +336,13 @@ class CodexAppServerSession {
         reject(new BridgeError(504, `${method} timed out after ${Math.round(timeoutMs / 1000)}s.`));
       }, timeoutMs);
       this.pending.set(id, { method, resolve, reject, timeout });
-      this.send({ method, id, params });
+      try {
+        this.send({ method, id, params });
+      } catch (error) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(error instanceof BridgeError ? error : new BridgeError(502, error.message || "Could not send Codex app-server request."));
+      }
     });
   }
 
@@ -216,7 +351,18 @@ class CodexAppServerSession {
   }
 
   send(message) {
-    this.proc.stdin.write(`${JSON.stringify(message)}\n`);
+    const payload = JSON.stringify(message);
+    if (this.ws) {
+      if (this.ws.readyState !== WebSocket.OPEN) {
+        throw new BridgeError(502, "Codex app-server WebSocket is not open.");
+      }
+      this.ws.send(payload);
+      return;
+    }
+    if (!this.proc?.stdin?.writable) {
+      throw new BridgeError(502, "Codex app-server stdin is not writable.");
+    }
+    this.proc.stdin.write(`${payload}\n`);
   }
 
   waitForNotification(predicate, timeoutMs) {
@@ -247,9 +393,13 @@ class CodexAppServerSession {
   }
 
   close() {
+    this.closing = true;
     this.closed = true;
-    this.rl.close();
-    if (!this.proc.killed) {
+    this.rl?.close();
+    if (this.ws && this.ws.readyState < WebSocket.CLOSING) {
+      this.ws.close();
+    }
+    if (this.proc && !this.proc.killed) {
       this.proc.kill("SIGTERM");
     }
   }
@@ -310,6 +460,8 @@ async function statusPayload() {
     const models = await listModels(session);
     return {
       ok: true,
+      codexAppServerTransport: session.transport,
+      codexAppServerTarget: session.target,
       requiresOpenaiAuth: Boolean(account?.requiresOpenaiAuth),
       needsLogin: Boolean(account?.requiresOpenaiAuth && !account?.account),
       account: account?.account || null,
@@ -1660,7 +1812,7 @@ function runCursorCommand(args, timeoutMs = CURSOR_TIMEOUT_MS, job = null) {
     let settled = false;
     let stdout = "";
     let stderr = "";
-    const proc = spawn(CURSOR_BIN, args, {
+    const proc = spawnCli(CURSOR_BIN, args, {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
@@ -2233,5 +2385,9 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Minedit Codex bridge listening on http://${HOST}:${PORT}`);
-  console.log(`Using Codex binary: ${CODEX_BIN}`);
+  if (CODEX_APP_SERVER_URL) {
+    console.log(`Using Codex app-server WebSocket: ${CODEX_APP_SERVER_URL}`);
+  } else {
+    console.log(`Using Codex binary: ${CODEX_BIN}`);
+  }
 });

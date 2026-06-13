@@ -32,14 +32,14 @@ Minedit is required on the server for commands, AI calls, block placement, and r
 | Provider | Configure | Transport | Supported modes | Notes |
 | --- | --- | --- | --- | --- |
 | OpenRouter | `/provider openrouter`, `/apikey <key>` | OpenAI-compatible chat completions | build, staged build, edit, quick edit | Default provider. Supports streaming progress and usage lookup. |
-| Codex | `/provider codex`, `/codexurl <url>` | Local Minedit bridge to `codex app-server` | build, staged build, edit, quick edit, agent build, step-by-step agent build | `/provider codex-local` remains accepted. |
+| Codex | `/provider codex`, `/codexurl <url>` | Minedit bridge to spawned or WebSocket `codex app-server` | build, staged build, edit, quick edit, agent build, step-by-step agent build | `/provider codex-local` remains accepted. |
 | Hermes | `/provider hermes`, `/hermesurl <url>`, `/hermestoken <token>` | Direct Hermes `/v1/runs` and SSE events | build, staged build, edit, quick edit, agent build | Approval requests are shown as progress messages; Minedit does not approve actions automatically. |
 | Cursor | `/provider cursor`, `/codexurl <url>` | Local Minedit bridge to Cursor CLI | build, staged build, edit, quick edit, agent build, step-by-step agent build | Cursor models come from `/model list cursor`. |
 
 Provider requirements:
 
 - OpenRouter API key for OpenRouter mode
-- Node.js 18+ and the Codex CLI for local Codex bridge mode
+- Node.js 18+ and the Codex CLI for Codex bridge mode
 - Cursor CLI for local Cursor bridge mode
 - Hermes `/v1/runs` endpoint for Hermes mode
 
@@ -161,7 +161,7 @@ Set quick edit reasoning effort:
 
 ## Local Bridge
 
-The local bridge lets Minecraft talk to `codex app-server` or Cursor CLI through a localhost HTTP server.
+The local bridge lets Minecraft talk to `codex app-server` or Cursor CLI through a small HTTP server. Minecraft always points to this bridge with `/codexurl`; the bridge can either start Codex itself or connect to an existing Codex app-server WebSocket.
 
 Requirements:
 
@@ -177,7 +177,13 @@ codex login
 agent login
 ```
 
-Start the bridge from the repository:
+Install bridge dependencies once:
+
+```sh
+npm --prefix bridge install
+```
+
+Default Codex mode starts `codex app-server` for each bridge request:
 
 ```sh
 npm --prefix bridge start
@@ -197,6 +203,22 @@ Then in Minecraft:
 /codex status
 /model gpt-5.5
 ```
+
+To reuse an already-running Codex app-server, start Codex with a WebSocket listener and point the bridge at it:
+
+```sh
+codex app-server --listen ws://127.0.0.1:4500
+MINEDIT_CODEX_APP_SERVER_URL=ws://127.0.0.1:4500 npm --prefix bridge start
+```
+
+For another host, run the Codex app-server there and use WebSocket auth. This example assumes a VPN or SSH tunnel:
+
+```sh
+codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /path/to/token
+MINEDIT_CODEX_APP_SERVER_URL=ws://codex-host:4500 MINEDIT_CODEX_APP_SERVER_TOKEN_FILE=/path/to/token npm --prefix bridge start
+```
+
+Use `ws://` only for localhost, VPN, or SSH-tunneled connections. For shared or remote networks, put the app-server behind TLS and auth, then use `wss://`.
 
 Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge strips `openai/` automatically, so `openai/gpt-5.5` becomes `gpt-5.5`, but setting `/model gpt-5.5` is clearer when using Codex.
 
