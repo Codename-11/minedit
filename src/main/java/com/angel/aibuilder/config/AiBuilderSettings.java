@@ -33,6 +33,25 @@ public final class AiBuilderSettings {
         return PROPERTIES.getProperty("codex_url", "http://127.0.0.1:8765").trim();
     }
 
+    public static synchronized String hermesUrl() {
+        load();
+        return PROPERTIES.getProperty("hermes_url", "http://127.0.0.1:8642/v1").trim();
+    }
+
+    public static synchronized String hermesToken() {
+        load();
+        return PROPERTIES.getProperty("hermes_token", "").trim();
+    }
+
+    public static synchronized String hermesTokenOrEnv() {
+        String configured = hermesToken();
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        String env = System.getenv("HERMES_GATEWAY_TOKEN");
+        return env == null ? "" : env.trim();
+    }
+
     public static synchronized String model() {
         load();
         return PROPERTIES.getProperty("model", "openai/gpt-5.5").trim();
@@ -68,6 +87,18 @@ public final class AiBuilderSettings {
     public static synchronized void setCodexUrl(String url) throws IOException {
         load();
         PROPERTIES.setProperty("codex_url", url.trim());
+        save();
+    }
+
+    public static synchronized void setHermesUrl(String url) throws IOException {
+        load();
+        PROPERTIES.setProperty("hermes_url", url.trim());
+        save();
+    }
+
+    public static synchronized void setHermesToken(String token) throws IOException {
+        load();
+        PROPERTIES.setProperty("hermes_token", token.trim());
         save();
     }
 

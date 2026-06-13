@@ -63,7 +63,9 @@ public class AiBuilderCommands {
                             try {
                                 AiBuilderSettings.setProvider(provider.id());
                                 if (provider == AiProvider.CODEX_LOCAL) {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex local bridge. Start it with `npm --prefix bridge start`, then use /codex status.").withStyle(ChatFormatting.GREEN), false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex local bridge. Start it with `npm --prefix bridge start`, then use /codex status. The alias /provider codex also works.").withStyle(ChatFormatting.GREEN), false);
+                                } else if (provider == AiProvider.HERMES) {
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Hermes. Configure with /hermesurl and /hermestoken if your Hermes endpoint requires a token.").withStyle(ChatFormatting.GREEN), false);
                                 } else if (provider == AiProvider.CURSOR) {
                                     ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Cursor local bridge. Start it with `npm --prefix bridge start`, then use /model list cursor and /model auto or another Cursor model id.").withStyle(ChatFormatting.GREEN), false);
                                 } else {
@@ -84,6 +86,31 @@ public class AiBuilderCommands {
                                 ctx.getSource().sendSuccess(() -> Component.literal("Minedit local bridge URL set to " + url).withStyle(ChatFormatting.GREEN), false);
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save local bridge URL: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("hermesurl")
+                .then(Commands.argument("url", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            try {
+                                String url = StringArgumentType.getString(ctx, "url");
+                                AiBuilderSettings.setHermesUrl(url);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Hermes URL set to " + url).withStyle(ChatFormatting.GREEN), false);
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save Hermes URL: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("hermestoken")
+                .then(Commands.argument("token", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            try {
+                                AiBuilderSettings.setHermesToken(StringArgumentType.getString(ctx, "token"));
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Hermes token saved.").withStyle(ChatFormatting.GREEN), false);
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save Hermes token: " + e.getMessage()));
                             }
                             return 1;
                         })));
@@ -286,7 +313,7 @@ public class AiBuilderCommands {
                                             if (options == null) {
                                                 return 0;
                                             }
-                                            if (!isLocalAgentProvider(options.provider())) {
+                                            if (!supportsStepByStepAgent(options.provider())) {
                                                 ctx.getSource().sendFailure(Component.literal("Minedit step-by-step agent build only works with Codex local or Cursor. Use /provider codex-local or /provider cursor and start the bridge with `npm --prefix bridge start`."));
                                                 return 0;
                                             }
@@ -298,7 +325,7 @@ public class AiBuilderCommands {
                                             }
 
                                             String prompt = StringArgumentType.getString(ctx, "prompt");
-                                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit tool agent: starting Codex tool-driven build with " + options.model() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
+                                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit tool agent: starting step-by-step build with " + options.targetDescription() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
                                             BuildJobService.agentStepByStepBuild(player, selection, prompt, options);
                                             return 1;
                                         })))
@@ -309,8 +336,8 @@ public class AiBuilderCommands {
                                     if (options == null) {
                                         return 0;
                                     }
-                                    if (!isLocalAgentProvider(options.provider())) {
-                                        ctx.getSource().sendFailure(Component.literal("Minedit agent build only works with Codex local or Cursor. Use /provider codex-local or /provider cursor and start the bridge with `npm --prefix bridge start`."));
+                                    if (!supportsAgentBuild(options.provider())) {
+                                        ctx.getSource().sendFailure(Component.literal("Minedit agent build works with Codex local, Hermes, or Cursor. Use /provider codex, /provider hermes, or /provider cursor."));
                                         return 0;
                                     }
 
@@ -321,7 +348,7 @@ public class AiBuilderCommands {
                                     }
 
                                     String prompt = StringArgumentType.getString(ctx, "prompt");
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit agent: starting Codex agent build with " + options.model() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit agent: starting agent build with " + options.targetDescription() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
                                     BuildJobService.agentBuild(player, selection, prompt, options);
                                     return 1;
                                 })))
@@ -453,17 +480,24 @@ public class AiBuilderCommands {
         if (provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR) {
             return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming);
         }
+        if (provider == AiProvider.HERMES) {
+            return new AiRequestOptions(provider, "", "", AiBuilderSettings.hermesUrl(), AiBuilderSettings.hermesTokenOrEnv(), model, effort, streaming);
+        }
 
         String apiKey = AiBuilderSettings.apiKey();
         if (apiKey.isEmpty()) {
-            source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local or /provider cursor."));
+            source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex, /provider hermes, or /provider cursor."));
             return null;
         }
         return new AiRequestOptions(provider, apiKey, "", model, effort, streaming);
     }
 
-    private static boolean isLocalAgentProvider(AiProvider provider) {
+    private static boolean supportsStepByStepAgent(AiProvider provider) {
         return provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR;
+    }
+
+    private static boolean supportsAgentBuild(AiProvider provider) {
+        return provider == AiProvider.CODEX_LOCAL || provider == AiProvider.HERMES || provider == AiProvider.CURSOR;
     }
 
     private static void listModels(CommandSourceStack source, String providerId) {
@@ -526,7 +560,10 @@ public class AiBuilderCommands {
         String quickEffort = AiBuilderSettings.quickEffort();
         boolean streaming = AiBuilderSettings.streaming();
         String codexUrl = AiBuilderSettings.codexUrl();
+        String hermesUrl = AiBuilderSettings.hermesUrl();
         boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
+        boolean hasHermesToken = !AiBuilderSettings.hermesToken().isEmpty();
+        boolean hasHermesEnvToken = !AiBuilderSettings.hermesTokenOrEnv().isEmpty() && !hasHermesToken;
 
         source.sendSuccess(() -> Component.literal("Minedit status").withStyle(ChatFormatting.GOLD), false);
         source.sendSuccess(() -> Component.literal("Provider: " + provider.displayName() + " (" + provider.id() + ")").withStyle(ChatFormatting.GRAY), false);
@@ -536,6 +573,8 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Hermes URL: " + hermesUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Hermes token: " + (hasHermesToken ? "saved" : hasHermesEnvToken ? "from HERMES_GATEWAY_TOKEN" : "not set")).withStyle(hasHermesToken || hasHermesEnvToken ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
 

@@ -1,9 +1,11 @@
 ### Gradle ###
 .gradle
 build/
+**/build/
 .jdks/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/**/build/
+!**/src/**/build/**
 
 ### IntelliJ IDEA ###
 .idea/

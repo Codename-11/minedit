@@ -1,27 +1,45 @@
 # Minedit
 
-Minedit is an experimental NeoForge mod for building and editing Minecraft structures with AI models through OpenRouter or a local bridge for Codex or Cursor.
+Minedit is an experimental Minecraft mod for building and editing structures with AI models through OpenRouter, a local bridge for Codex or Cursor, or a Hermes runs endpoint.
 
 Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It can also edit existing builds with compact line-aware patches, generate builds in focused stages, and run local bridge agent modes.
+
+This fork is maintained as a multi-loader, multi-provider build. The current focus is preserving the existing NeoForge behavior while adding Forge 1.20.1 support and a cleaner provider path for local and remote agents.
 
 ## Status and Risk
 
 Minedit is a work in progress. Expect things to break.
 
-This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
+This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Hermes requests use the Hermes endpoint and token you configure and may consume whatever account or runtime that endpoint is backed by. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
 
-Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
+Your OpenRouter API key and saved Hermes token are stored in plaintext in your Minecraft game directory at `config/minedit.properties`. They are not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
 
 Back up worlds before testing large builds, staged builds, agent builds, or edits.
 
-## Requirements
+## Supported Loaders
 
-- Minecraft `26.1.2`
-- NeoForge `26.1.2.73`
-- Java 25 for development/building
+| Loader | Minecraft | Loader version | Development Java | Build output |
+| --- | --- | --- | --- | --- |
+| NeoForge | `26.1.2` | NeoForge `26.1.2.73` | Java 25 | `build/libs/minedit-<version>.jar` |
+| Forge | `1.20.1` | Forge `47.4.5` or compatible `47.x` | Java 17 | `forge1201/build/libs/minedit-forge-1.20.1-<version>.jar` |
+
+Forge support is currently scoped to Minecraft `1.20.1` and Forge `47.4.5`. Additional Minecraft versions should be added deliberately when an API or loader break requires a separate compatibility target.
+
+## Providers
+
+| Provider | Configure | Transport | Supported modes | Notes |
+| --- | --- | --- | --- | --- |
+| OpenRouter | `/provider openrouter`, `/apikey <key>` | OpenAI-compatible chat completions | build, staged build, edit, quick edit | Default provider. Supports streaming progress and usage lookup. |
+| Codex | `/provider codex`, `/codexurl <url>` | Local Minedit bridge to `codex app-server` | build, staged build, edit, quick edit, agent build, step-by-step agent build | `/provider codex-local` remains accepted. |
+| Hermes | `/provider hermes`, `/hermesurl <url>`, `/hermestoken <token>` | Direct Hermes `/v1/runs` and SSE events | build, staged build, edit, quick edit, agent build | Approval requests are shown as progress messages; Minedit does not approve actions automatically. |
+| Cursor | `/provider cursor`, `/codexurl <url>` | Local Minedit bridge to Cursor CLI | build, staged build, edit, quick edit, agent build, step-by-step agent build | Cursor models come from `/model list cursor`. |
+
+Provider requirements:
+
 - OpenRouter API key for OpenRouter mode
 - Node.js 18+ and the Codex CLI for local Codex bridge mode
 - Cursor CLI for local Cursor bridge mode
+- Hermes `/v1/runs` endpoint for Hermes mode
 
 ## Installation
 
@@ -31,15 +49,25 @@ You can either download a prebuilt jar from the GitHub Releases page or build it
 
 1. Download the latest jar from the [Minedit releases page](https://github.com/Angais/minedit/releases).
 2. Copy the jar into your Minecraft `mods` folder.
-3. Start the NeoForge profile.
+3. Start the matching NeoForge or Forge profile.
 
 ### Build from Source
 
+NeoForge:
+
 ```sh
-./gradlew build
+./gradlew jar
 ```
 
-Copy the jar from `build/libs/` into your Minecraft `mods` folder, then start the NeoForge profile.
+Copy the jar from `build/libs/` into your NeoForge `mods` folder.
+
+Forge 1.20.1:
+
+```sh
+./gradlew :forge1201:jar
+```
+
+Copy the jar from `forge1201/build/libs/` into your Forge 1.20.1 `mods` folder.
 
 ## Quick Start
 
@@ -89,21 +117,23 @@ The staged builder currently runs these stages:
 
 Each stage receives the previous stage code as context and should only output incremental work for the current stage. This usually costs more than `/build`, but it gives the model more focus per phase.
 
-### Local Agent Build
+### Agent Build
 
-Agent modes work with the local bridge through Codex or Cursor:
+Agent mode works with the local bridge through Codex or Cursor, or directly through Hermes:
 
 ```mcfunction
-/provider codex-local
+/provider codex
 # or
 /provider cursor
+# or
+/provider hermes
 /build agent <prompt>
 /build agent step-by-step <prompt>
 ```
 
-`/build agent <prompt>` asks the local agent provider to draft, preview, and revise before Minecraft places the final build.
+`/build agent <prompt>` asks the configured agent provider to draft, preview, and revise before Minecraft places the final build.
 
-`/build agent step-by-step <prompt>` places the build in multiple visible steps. Codex uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
+`/build agent step-by-step <prompt>` places the build in multiple visible steps. Step-by-step mode currently supports Codex and Cursor through the local bridge. Codex uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
 
 ## Editing
 
@@ -134,7 +164,7 @@ The local bridge lets Minecraft talk to `codex app-server` or Cursor CLI through
 Requirements:
 
 - Node.js 18+
-- Codex CLI installed and logged in for `/provider codex-local`
+- Codex CLI installed and logged in for `/provider codex` or `/provider codex-local`
 - Cursor CLI installed and logged in for `/provider cursor`
 - This repository or source zip available locally, because the bridge code lives in `bridge/`
 
@@ -160,7 +190,7 @@ http://127.0.0.1:8765
 Then in Minecraft:
 
 ```mcfunction
-/provider codex-local
+/provider codex
 /codexurl http://127.0.0.1:8765
 /codex status
 /model gpt-5.5
@@ -179,15 +209,38 @@ For Cursor:
 
 Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor model ids are the ids returned by `/model list cursor`, such as `auto` or account-specific ids like `gpt-5.5-medium`.
 
+## Hermes
+
+Hermes mode sends requests directly to a Hermes runs endpoint. The default URL is:
+
+```text
+http://127.0.0.1:8642/v1
+```
+
+Configure Hermes in Minecraft:
+
+```mcfunction
+/provider hermes
+/hermesurl http://127.0.0.1:8642/v1
+/hermestoken <token>
+/model gpt-5.5
+```
+
+If no Hermes token is saved, Minedit will use the `HERMES_GATEWAY_TOKEN` environment variable when it is available. Hermes approval requests are surfaced as progress messages, but Minedit does not grant approvals automatically.
+
 ## Settings Commands
 
 ```mcfunction
 /provider openrouter
+/provider codex
 /provider codex-local
+/provider hermes
 /provider cursor
 /apikey <openrouter-key>
 /codexurl http://127.0.0.1:8765
 /codex status
+/hermesurl http://127.0.0.1:8642/v1
+/hermestoken <token>
 /model list cursor
 /model <model-id>
 /build export <prompt>
@@ -218,11 +271,11 @@ OpenRouter streaming: enabled
 
 `/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
 
-`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible.
+`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are cancelled through the local bridge when possible, and Hermes runs are stopped through the configured runs endpoint when possible.
 
-`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
+`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge/Hermes configuration, current selection, active AI generations, and queued block placement jobs.
 
-Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The local bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+Settings are saved in `config/minedit.properties`. The OpenRouter API key and Hermes token in that file are plaintext and belong to the whole Minecraft game directory/profile, not a single world. The local bridge URL, Hermes URL, and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
 ## Manual Export and Import
 
@@ -332,14 +385,26 @@ Minedit prompts models to avoid common Minecraft placement problems such as unsu
 
 Model output is still imperfect. Use `/reset build` and world backups while testing.
 
+## Architecture Notes
+
+- Shared mod code lives in `src/main/java`.
+- The NeoForge build is the root Gradle project.
+- The Forge 1.20.1 build lives in `forge1201/` and generates Forge-compatible sources from the shared Java sources during Gradle builds.
+- Loader differences are intentionally kept narrow: Forge-specific metadata, client bootstrap, event/import rewrites, and small Minecraft 1.20.1 API shims live in the Forge subproject.
+- Provider selection flows through `AiProvider`, `AiRequestOptions`, and provider-specific clients.
+- Generated builds are constrained to the selected footprint/build zone. `/reset build` restores the pre-edit snapshot for the last generated build/edit when available.
+
+When adding another Minecraft version, prefer a small loader/version subproject first. Move code into a deeper common/platform abstraction only when compatibility rewrites become hard to reason about.
+
 ## Credits and Third-Party Technology
 
 - Built with the NeoForge MDK template. The template files are MIT licensed by the NeoForged project; see `TEMPLATE_LICENSE.txt`.
-- Uses NeoForge for Minecraft mod loading and APIs.
-- Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through NeoForge Jar-in-Jar. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
+- Uses NeoForge and Minecraft Forge for mod loading and APIs.
+- Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through loader Jar-in-Jar support. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
 - Uses OpenRouter's OpenAI-compatible chat completions API.
 - Optionally uses the OpenAI Codex app-server through the local `bridge/` helper.
 - Optionally uses Cursor CLI through the local `bridge/` helper.
+- Optionally uses Hermes `/v1/runs` endpoints directly.
 
 ## License
 

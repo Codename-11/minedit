@@ -1,0 +1,128 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev.legacyforge'
+    id 'idea'
+}
+
+version = rootProject.mod_version
+group = rootProject.mod_group_id
+
+base {
+    archivesName = "${rootProject.mod_id}-forge-1.20.1"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+def forgeMinecraftVersion = '1.20.1'
+def forgeVersion = '47.4.5'
+def generatedForgeSources = layout.buildDirectory.dir('generated/sources/forgeCompat/java')
+
+legacyForge {
+    version = "${forgeMinecraftVersion}-${forgeVersion}"
+    validateAccessTransformers = true
+
+    runs {
+        client {
+            client()
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+        }
+
+        data {
+            data()
+            programArguments.addAll '--mod', rootProject.mod_id, '--all', '--output', file('src/generated/resources/').absolutePath, '--existing', rootProject.file('src/main/resources/').absolutePath
+        }
+
+        configureEach {
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${rootProject.mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+sourceSets.main.java.srcDir generatedForgeSources
+sourceSets.main.resources.srcDir rootProject.file('src/main/resources')
+
+tasks.register('generateForgeCompatSources', Sync) {
+    inputs.property 'compatFilterVersion', '2'
+    from(rootProject.file('src/main/java')) {
+        exclude 'com/angel/aibuilder/client/AiBuilderClient.java'
+    }
+    into generatedForgeSources
+    filter { String line ->
+        line
+                .replace('net.neoforged.bus.api.SubscribeEvent', 'net.minecraftforge.eventbus.api.SubscribeEvent')
+                .replace('net.neoforged.bus.api.IEventBus', 'net.minecraftforge.eventbus.api.IEventBus')
+                .replace('net.neoforged.fml.common.Mod', 'net.minecraftforge.fml.common.Mod')
+                .replace('net.neoforged.fml.loading.FMLPaths', 'net.minecraftforge.fml.loading.FMLPaths')
+                .replace('net.neoforged.api.distmarker.Dist', 'net.minecraftforge.api.distmarker.Dist')
+                .replace('net.neoforged.neoforge.common.NeoForge', 'net.minecraftforge.common.MinecraftForge')
+                .replace('NeoForge.EVENT_BUS', 'MinecraftForge.EVENT_BUS')
+                .replace('net.neoforged.neoforge.event.RegisterCommandsEvent', 'net.minecraftforge.event.RegisterCommandsEvent')
+                .replace('net.neoforged.neoforge.event.entity.player.PlayerInteractEvent', 'net.minecraftforge.event.entity.player.PlayerInteractEvent')
+                .replace('net.neoforged.neoforge.event.entity.player.PlayerEvent', 'net.minecraftforge.event.entity.player.PlayerEvent')
+                .replace('import net.neoforged.neoforge.event.tick.ServerTickEvent;', 'import net.minecraftforge.event.TickEvent;\nimport net.minecraftforge.event.TickEvent.ServerTickEvent;')
+                .replace('import net.neoforged.neoforge.client.event.ClientTickEvent;', 'import net.minecraftforge.event.TickEvent;\nimport net.minecraftforge.event.TickEvent.ClientTickEvent;')
+                .replace('public AiBuilderMod(IEventBus modEventBus) {', 'public AiBuilderMod() {')
+                .replace('public void onServerTick(ServerTickEvent.Post event) {', 'public void onServerTick(ServerTickEvent event) {\n        if (event.phase != TickEvent.Phase.END) {\n            return;\n        }')
+                .replace('public void onClientTick(ClientTickEvent.Post event) {', 'public void onClientTick(ClientTickEvent event) {\n        if (event.phase != TickEvent.Phase.END) {\n            return;\n        }')
+                .replace('net.minecraft.resources.Identifier', 'net.minecraft.resources.ResourceLocation')
+                .replace('Identifier id;', 'ResourceLocation id;')
+                .replace('id = Identifier.parse(spec.blockId());', 'id = ResourceLocation.tryParse(spec.blockId());\n            if (id == null) {\n                return Optional.empty();\n            }')
+                .replace('BuiltInRegistries.BLOCK.getValue(id)', 'BuiltInRegistries.BLOCK.get(id)')
+                .replace('level.addParticle(ParticleTypes.END_ROD, true, false, x, y, z, 0.0, 0.0, 0.0);', 'level.addParticle(ParticleTypes.END_ROD, true, x, y, z, 0.0, 0.0, 0.0);')
+                .replace('level.getMaxY()', 'level.getMaxBuildHeight()')
+    }
+}
+
+tasks.named('compileJava').configure {
+    dependsOn tasks.named('generateForgeCompatSources')
+}
+
+dependencies {
+    jarJar(implementation(group: 'org.mozilla', name: 'rhino')) {
+        version {
+            prefer '1.8.0'
+        }
+    }
+}
+
+def generateForgeModMetadata = tasks.register('generateForgeModMetadata', ProcessResources) {
+    def replaceProperties = [
+            minecraft_version      : forgeMinecraftVersion,
+            minecraft_version_range: '[1.20.1,1.20.2)',
+            forge_version          : forgeVersion,
+            forge_version_range    : '[47.4.5,)',
+            mod_id                 : rootProject.mod_id,
+            mod_name               : rootProject.mod_name,
+            mod_license            : rootProject.mod_license,
+            mod_version            : rootProject.mod_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+
+sourceSets.main.resources.srcDir generateForgeModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

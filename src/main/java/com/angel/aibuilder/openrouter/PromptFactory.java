@@ -53,7 +53,7 @@ public final class PromptFactory {
 
     public static String create(BuildSelection selection, String userPrompt) {
         return """
-                You are controlling a Minecraft builder API inside NeoForge Minecraft 26.1.2.
+                You are controlling a Minecraft builder API inside Minecraft.
                 Generate Rhino-compatible JavaScript. Do not describe the build outside code.
 
                 The selected footprint is width=%d blocks on X and depth=%d blocks on Z.
@@ -100,7 +100,7 @@ public final class PromptFactory {
 
     public static String stagedBuild(BuildSelection selection, String userPrompt, int stageNumber, int stageCount, String stageName, String stageGoal, String stageRules, String previousStages) {
         return """
-                You are generating stage %d of %d for a staged Minecraft build inside NeoForge Minecraft 26.1.2.
+                You are generating stage %d of %d for a staged Minecraft build inside Minecraft.
                 Generate Rhino-compatible JavaScript for this stage only. Do not describe the build outside code.
 
                 The selected footprint is width=%d blocks on X and depth=%d blocks on Z.
@@ -151,7 +151,7 @@ public final class PromptFactory {
 
     public static String edit(BuildSelection selection, String existingStructure, String userPrompt) {
         return """
-                You are editing an existing Minecraft structure inside NeoForge Minecraft 26.1.2.
+                You are editing an existing Minecraft structure inside Minecraft.
                 Generate compact Rhino-compatible JavaScript. Do not describe the build outside code.
 
                 The selected footprint is width=%d blocks on X and depth=%d blocks on Z.
@@ -193,7 +193,7 @@ public final class PromptFactory {
 
     public static String quickEdit(BuildSelection selection, String existingStructure, String userPrompt) {
         return """
-                You are making a quick, targeted Minecraft edit inside NeoForge Minecraft 26.1.2.
+                You are making a quick, targeted Minecraft edit inside Minecraft.
                 Generate very compact Rhino-compatible JavaScript. Do not describe the edit outside code.
 
                 The selected footprint is width=%d blocks on X and depth=%d blocks on Z.

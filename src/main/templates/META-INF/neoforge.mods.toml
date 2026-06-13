@@ -33,14 +33,14 @@ displayURL="https://github.com/Angais/minedit" #optional
 #logoFile="minedit.png" #optional
 
 # A text field displayed in the mod UI
-credits="Uses NeoForge, Mozilla Rhino, OpenRouter, and optional OpenAI Codex app-server integration." #optional
+credits="Uses NeoForge, Mozilla Rhino, OpenRouter, optional OpenAI Codex app-server integration, Cursor, and Hermes." #optional
 
 # The authors of the mod, displayed in the mod UI (optional)
 authors="Angais"
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Prompt, build, stage, and edit Minecraft structures with OpenRouter models or a local Codex bridge.
+Prompt, build, stage, and edit Minecraft structures with OpenRouter models, local agent bridges, or Hermes.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
