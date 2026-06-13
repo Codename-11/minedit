@@ -336,11 +336,13 @@ Model output is still imperfect. Use `/reset build` and world backups while test
 
 - Built with the NeoForge MDK template. The template files are MIT licensed by the NeoForged project; see `TEMPLATE_LICENSE.txt`.
 - Uses NeoForge for Minecraft mod loading and APIs.
-- Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through NeoForge Jar-in-Jar. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
+- Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through NeoForge Jar-in-Jar. Rhino remains licensed under the Mozilla Public License 2.0; its corresponding source and license details are listed in `THIRD_PARTY_NOTICES.md`.
 - Uses OpenRouter's OpenAI-compatible chat completions API.
 - Optionally uses the OpenAI Codex app-server through the local `bridge/` helper.
 - Optionally uses Cursor CLI through the local `bridge/` helper.
 
 ## License
 
-Minedit is currently published as All Rights Reserved unless a separate license is added later. NeoForge MDK template files keep their original MIT license, documented in `TEMPLATE_LICENSE.txt`.
+Minedit's original code, documentation, and assets are open source under the [MIT License](LICENSE).
+
+Third-party components keep their original licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [TEMPLATE_LICENSE.txt](TEMPLATE_LICENSE.txt) for details.

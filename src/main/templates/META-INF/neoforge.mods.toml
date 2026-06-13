@@ -4,8 +4,7 @@
 # Note that there are a couple of TOML lists in this file.
 # Find more information on toml format here:  https://github.com/toml-lang/toml
 
-# The license for you mod. This is mandatory metadata and allows for easier comprehension of your redistributive properties.
-# Review your options at https://choosealicense.com/. All rights reserved is the default copyright stance, and is thus the default here.
+# SPDX identifier for the license covering Minedit's original code and assets.
 license="${mod_license}"
 
 # A URL to refer people to when problems occur with this mod
