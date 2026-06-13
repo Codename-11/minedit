@@ -59,27 +59,7 @@ public class AiBuilderCommands {
         event.getDispatcher().register(Commands.literal("provider")
                 .then(Commands.argument("provider", StringArgumentType.word())
                         .executes(ctx -> {
-                            String providerId = StringArgumentType.getString(ctx, "provider");
-                            AiProvider provider = AiProvider.fromId(providerId).orElse(null);
-                            if (provider == null) {
-                                ctx.getSource().sendFailure(Component.literal("Provider must be one of: " + AiProvider.ids() + "."));
-                                return 0;
-                            }
-                            try {
-                                AiBuilderSettings.setProvider(provider.id());
-                                if (provider == AiProvider.CODEX_LOCAL) {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex. Use /codexurl http://... for the bridge or ws://... for direct app-server, then /codex status.").withStyle(ChatFormatting.GREEN), false);
-                                } else if (provider == AiProvider.HERMES) {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Hermes. Configure with /hermesurl and /hermestoken if your Hermes endpoint requires a token.").withStyle(ChatFormatting.GREEN), false);
-                                } else if (provider == AiProvider.CURSOR) {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Cursor local bridge. Start it with `npm --prefix bridge start`, then use /model list cursor and /model auto or another Cursor model id.").withStyle(ChatFormatting.GREEN), false);
-                                } else {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to OpenRouter.").withStyle(ChatFormatting.GREEN), false);
-                                }
-                            } catch (IOException e) {
-                                ctx.getSource().sendFailure(Component.literal("Could not save provider: " + e.getMessage()));
-                            }
-                            return 1;
+                            return setProvider(ctx.getSource(), StringArgumentType.getString(ctx, "provider"));
                         })));
 
         event.getDispatcher().register(Commands.literal("codexurl")
@@ -185,14 +165,7 @@ public class AiBuilderCommands {
                                 })))
                 .then(Commands.argument("model", StringArgumentType.greedyString())
                         .executes(ctx -> {
-                            try {
-                                String model = StringArgumentType.getString(ctx, "model");
-                                AiBuilderSettings.setModel(model);
-                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit model set to " + model).withStyle(ChatFormatting.GREEN), false);
-                            } catch (IOException e) {
-                                ctx.getSource().sendFailure(Component.literal("Could not save model: " + e.getMessage()));
-                            }
-                            return 1;
+                            return setModel(ctx.getSource(), StringArgumentType.getString(ctx, "model"));
                         })));
 
         event.getDispatcher().register(Commands.literal("streaming")
@@ -513,14 +486,20 @@ public class AiBuilderCommands {
         CommandNode<CommandSourceStack> build = requireNode(event, "build");
         CommandNode<CommandSourceStack> edit = requireNode(event, "edit");
         CommandNode<CommandSourceStack> reset = requireNode(event, "reset");
+        CommandNode<CommandSourceStack> codexStatus = requireChildNode(codex, "codex", "status");
+        CommandNode<CommandSourceStack> modelList = requireChildNode(model, "model", "list");
+        CommandNode<CommandSourceStack> resetSelection = requireChildNode(reset, "reset", "selection");
 
         event.getDispatcher().register(Commands.literal("minedit")
                 .then(Commands.literal("apikey").redirect(apikey))
                 .then(Commands.literal("provider")
-                        .redirect(provider)
-                        .then(Commands.literal("set").redirect(provider)))
+                        .then(Commands.argument("provider", StringArgumentType.word())
+                                .executes(ctx -> setProvider(ctx.getSource(), StringArgumentType.getString(ctx, "provider"))))
+                        .then(Commands.literal("set")
+                                .then(Commands.argument("provider", StringArgumentType.word())
+                                        .executes(ctx -> setProvider(ctx.getSource(), StringArgumentType.getString(ctx, "provider"))))))
                 .then(Commands.literal("codex")
-                        .redirect(codex)
+                        .then(Commands.literal("status").redirect(codexStatus))
                         .then(Commands.literal("url").redirect(codexUrl))
                         .then(Commands.literal("token").redirect(codexToken)))
                 .then(Commands.literal("hermes")
@@ -528,8 +507,12 @@ public class AiBuilderCommands {
                         .then(Commands.literal("token").redirect(hermesToken)))
                 .then(Commands.literal("effort").redirect(effort))
                 .then(Commands.literal("model")
-                        .redirect(model)
-                        .then(Commands.literal("set").redirect(model)))
+                        .then(Commands.literal("list").redirect(modelList))
+                        .then(Commands.literal("set")
+                                .then(Commands.argument("model", StringArgumentType.greedyString())
+                                        .executes(ctx -> setModel(ctx.getSource(), StringArgumentType.getString(ctx, "model")))))
+                        .then(Commands.argument("model", StringArgumentType.greedyString())
+                                .executes(ctx -> setModel(ctx.getSource(), StringArgumentType.getString(ctx, "model")))))
                 .then(Commands.literal("streaming").redirect(streaming))
                 .then(Commands.literal("stop").redirect(stop))
                 .then(Commands.literal("status").redirect(status))
@@ -541,7 +524,7 @@ public class AiBuilderCommands {
                         .then(Commands.argument("message", StringArgumentType.greedyString())
                                 .executes(ctx -> startChat(ctx.getSource(), StringArgumentType.getString(ctx, "message")))))
                 .then(Commands.literal("selection")
-                        .then(Commands.literal("clear").redirect(reset.getChild("selection")))
+                        .then(Commands.literal("clear").redirect(resetSelection))
                         .then(Commands.literal("tool")
                                 .executes(ctx -> sendSelectionToolStatus(ctx.getSource()))
                                 .then(Commands.argument("enabled", StringArgumentType.word())
@@ -554,6 +537,47 @@ public class AiBuilderCommands {
             throw new IllegalStateException("Missing command node: " + name);
         }
         return node;
+    }
+
+    private static CommandNode<CommandSourceStack> requireChildNode(CommandNode<CommandSourceStack> parent, String parentName, String childName) {
+        CommandNode<CommandSourceStack> node = parent.getChild(childName);
+        if (node == null) {
+            throw new IllegalStateException("Missing command node: " + parentName + " " + childName);
+        }
+        return node;
+    }
+
+    private static int setProvider(CommandSourceStack source, String providerId) {
+        AiProvider provider = AiProvider.fromId(providerId).orElse(null);
+        if (provider == null) {
+            source.sendFailure(Component.literal("Provider must be one of: " + AiProvider.ids() + "."));
+            return 0;
+        }
+        try {
+            AiBuilderSettings.setProvider(provider.id());
+            if (provider == AiProvider.CODEX_LOCAL) {
+                source.sendSuccess(() -> Component.literal("Minedit provider set to Codex. Use /codexurl http://... for the bridge or ws://... for direct app-server, then /codex status.").withStyle(ChatFormatting.GREEN), false);
+            } else if (provider == AiProvider.HERMES) {
+                source.sendSuccess(() -> Component.literal("Minedit provider set to Hermes. Configure with /hermesurl and /hermestoken if your Hermes endpoint requires a token.").withStyle(ChatFormatting.GREEN), false);
+            } else if (provider == AiProvider.CURSOR) {
+                source.sendSuccess(() -> Component.literal("Minedit provider set to Cursor local bridge. Start it with `npm --prefix bridge start`, then use /model list cursor and /model auto or another Cursor model id.").withStyle(ChatFormatting.GREEN), false);
+            } else {
+                source.sendSuccess(() -> Component.literal("Minedit provider set to OpenRouter.").withStyle(ChatFormatting.GREEN), false);
+            }
+        } catch (IOException e) {
+            source.sendFailure(Component.literal("Could not save provider: " + e.getMessage()));
+        }
+        return 1;
+    }
+
+    private static int setModel(CommandSourceStack source, String model) {
+        try {
+            AiBuilderSettings.setModel(model);
+            source.sendSuccess(() -> Component.literal("Minedit model set to " + model).withStyle(ChatFormatting.GREEN), false);
+        } catch (IOException e) {
+            source.sendFailure(Component.literal("Could not save model: " + e.getMessage()));
+        }
+        return 1;
     }
 
     private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {
