@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="title desc">
+  <title id="title">Minedit monochrome mark</title>
+  <desc id="desc">A selected block footprint with two highlighted corners and an edit cursor.</desc>
+  <rect x="16" y="16" width="32" height="32" rx="3"/>
+  <path d="M27 17.5v29M37 17.5v29M17.5 27h29M17.5 37h29" stroke-width="1.5"/>
+  <path d="M16 26v-10h10M38 48h10v-10"/>
+  <circle cx="16" cy="16" r="4.5" fill="currentColor" stroke="none"/>
+  <circle cx="48" cy="48" r="4.5" fill="currentColor" stroke="none"/>
+  <path d="M34 29l15 7-6.4 2.1 4.4 8.6-4.8 2.5-4.4-8.6-5.3 5.1z" fill="currentColor" stroke="none"/>
+</svg>

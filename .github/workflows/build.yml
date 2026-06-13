@@ -21,11 +21,29 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build with Gradle
-        run: ./gradlew build
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
 
-      - name: Upload mod jar
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Build docs
+        run: npm run docs:build
+
+      - name: Build mod jars
+        run: ./gradlew jar :forge1201:jar
+
+      - name: Upload NeoForge jar
         uses: actions/upload-artifact@v4
         with:
-          name: minedit-jar
-          path: build/libs/*.jar
+          name: Minedit-NeoForge
+          path: build/libs/Minedit-NeoForge-*-v*.jar
+
+      - name: Upload Forge jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Minedit-Forge
+          path: forge1201/build/libs/Minedit-Forge-*-v*.jar

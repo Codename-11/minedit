@@ -1,16 +1,16 @@
 modLoader="javafml"
 loaderVersion="[47,)"
 license="${mod_license}"
-issueTrackerURL="https://github.com/Angais/minedit/issues"
+issueTrackerURL="https://github.com/Codename-11/minedit/issues"
 
 [[mods]]
 modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
 displayTest="IGNORE_SERVER_VERSION"
-displayURL="https://github.com/Angais/minedit"
+displayURL="https://github.com/Codename-11/minedit"
 credits="Uses Minecraft Forge, Mozilla Rhino, OpenRouter, OpenAI Codex local bridge, Cursor local bridge, and optional Hermes runs integration."
-authors="Angais"
+authors="Angais, Codename-11"
 description='''
 Prompt, build, stage, and edit Minecraft structures with OpenRouter models, local agent bridges, or Hermes.
 '''

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- VitePress user documentation under `user-docs/`.
+- Maintainer docs split across `docs/`, `DEVLOG.md`, and `RELEASE.md`.
+- Minedit brand SVG assets and README logo lockup.
+
+### Changed
+
+- Release jar names now use `Minedit-NeoForge-<minecraft>-v<version>.jar` and `Minedit-Forge-<minecraft>-v<version>.jar`.
+- GitHub Actions now builds docs plus both loader jars and uploads only public mod jars.
+- README is now a short project front door instead of the full user manual.
+- `/minedit` command aliases now avoid ambiguous Brigadier redirects that could crash a server.
+
 ## 1.5.1
 
 ### Added

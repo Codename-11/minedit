@@ -35,6 +35,7 @@ bin/
 ### Node ###
 node_modules/
 .minedit-agent-previews/
+user-docs/.vitepress/dist/
 
 ### Local secrets and debug output ###
 .env

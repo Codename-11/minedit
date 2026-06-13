@@ -33,7 +33,7 @@ repositories {
 }
 
 base {
-    archivesName = mod_id
+    archivesName = "${mod_archive_name}-NeoForge-${minecraft_version}"
 }
 
 // Mojang ships Java 25 to end users in 26.1.2, so mods should target Java 25.
@@ -200,6 +200,7 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('jar', Jar).configure {
+    archiveVersion.set("v${project.version}")
     dependsOn relocatedRhinoTask
     from(zipTree(relocatedRhinoJar)) {
         exclude 'module-info.class'

@@ -1,0 +1,66 @@
+:root {
+  --vp-c-brand-1: #10b981;
+  --vp-c-brand-2: #34d399;
+  --vp-c-brand-3: #047857;
+  --vp-c-brand-soft: rgba(16, 185, 129, 0.16);
+  --vp-c-bg: #f8fafc;
+  --vp-c-bg-alt: #eef2f7;
+  --vp-c-bg-soft: #e9f3ef;
+  --vp-c-text-1: #111827;
+  --vp-c-text-2: #334155;
+  --vp-c-divider: rgba(17, 24, 39, 0.12);
+  --vp-c-border: rgba(17, 24, 39, 0.16);
+  --vp-font-family-base: "Aptos", "Segoe UI", system-ui, sans-serif;
+  --vp-font-family-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #111827 10%, #047857 55%, #b7791f 90%);
+  --vp-button-brand-bg: #111827;
+  --vp-button-brand-hover-bg: #0f766e;
+  --vp-button-brand-active-bg: #115e59;
+  --vp-button-brand-border: #111827;
+  --vp-button-brand-text: #f9fafb;
+}
+
+.dark {
+  --vp-c-bg: #07110f;
+  --vp-c-bg-alt: #0b1715;
+  --vp-c-bg-soft: #10231e;
+  --vp-c-text-1: #f8fafc;
+  --vp-c-text-2: #cbd5e1;
+  --vp-c-divider: rgba(255, 255, 255, 0.12);
+  --vp-c-border: rgba(255, 255, 255, 0.15);
+  --vp-home-hero-name-background: linear-gradient(120deg, #f8fafc 5%, #34d399 58%, #fbbf24 92%);
+}
+
+.VPNavBarTitle .logo {
+  border-radius: 8px;
+}
+
+.VPHome {
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.13), transparent 38%),
+    radial-gradient(circle at 82% 10%, rgba(251, 191, 36, 0.18), transparent 28%);
+}
+
+.VPHomeHero .image-bg {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.28), transparent 62%);
+  filter: blur(24px);
+}
+
+.VPFeature {
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+}
+
+.custom-block.warning,
+.custom-block.danger {
+  border-radius: 8px;
+}
+
+.vp-doc table {
+  font-size: 14px;
+}
+
+.vp-doc img {
+  border-radius: 8px;
+}

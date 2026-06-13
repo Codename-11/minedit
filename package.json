@@ -1,0 +1,13 @@
+{
+  "name": "minedit-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev user-docs",
+    "docs:build": "vitepress build user-docs",
+    "docs:preview": "vitepress preview user-docs"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}
