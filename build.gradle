@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.141'
+    id 'com.gradleup.shadow' version '9.4.2'
     id 'idea'
 }
 
@@ -111,7 +112,23 @@ neoForge {
 // "optional", meaning it will not be pulled by dependents of this mod.
 configurations {
     runtimeClasspath.extendsFrom localRuntime
+    rhinoRelocation
 }
+
+def relocatedRhinoTask = tasks.register('relocateRhino', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    archiveBaseName.set('rhino')
+    archiveClassifier.set('relocated')
+    archiveVersion.set('1.8.0')
+    configurations = [project.configurations.rhinoRelocation]
+    relocate 'org.mozilla.javascript', 'com.angel.aibuilder.vendor.rhino'
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/**/module-info.class'
+    exclude 'META-INF/*.RSA'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+}
+
+def relocatedRhinoJar = relocatedRhinoTask.flatMap { it.archiveFile }
 
 dependencies {
     // Example optional mod dependency with JEI
@@ -132,11 +149,8 @@ dependencies {
     // Example project dependency using a sister or child project:
     // implementation project(":myproject")
 
-    jarJar(implementation(group: 'org.mozilla', name: 'rhino')) {
-        version {
-            prefer '1.8.0'
-        }
-    }
+    rhinoRelocation 'org.mozilla:rhino:1.8.0'
+    implementation files(relocatedRhinoJar)
 
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
@@ -181,7 +195,19 @@ publishing {
 }
 
 tasks.withType(JavaCompile).configureEach {
+    dependsOn relocatedRhinoTask
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn relocatedRhinoTask
+    from(zipTree(relocatedRhinoJar)) {
+        exclude 'module-info.class'
+        exclude 'META-INF/versions/**/module-info.class'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
+    }
 }
 
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.

@@ -6,10 +6,11 @@ import com.angel.aibuilder.build.ExistingStructureScanner;
 import com.angel.aibuilder.build.FillOperation;
 import com.angel.aibuilder.build.FillOptions;
 import com.angel.aibuilder.build.SetBlockOperation;
-import org.mozilla.javascript.Context;
-import org.mozilla.javascript.NativeObject;
-import org.mozilla.javascript.Scriptable;
-import org.mozilla.javascript.ScriptableObject;
+import com.angel.aibuilder.vendor.rhino.Context;
+import com.angel.aibuilder.vendor.rhino.Function;
+import com.angel.aibuilder.vendor.rhino.NativeObject;
+import com.angel.aibuilder.vendor.rhino.Scriptable;
+import com.angel.aibuilder.vendor.rhino.ScriptableObject;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,7 +34,7 @@ public final class JsBuildRunner {
 
             context.evaluateString(scope, code, "ai-builder.js", 1, null);
             Object build = ScriptableObject.getProperty(scope, "build");
-            if (!(build instanceof org.mozilla.javascript.Function function)) {
+            if (!(build instanceof Function function)) {
                 throw new IllegalArgumentException("AI code must define function build(api).");
             }
             function.call(context, scope, scope, new Object[]{wrappedApi});

@@ -25,6 +25,8 @@ Back up worlds before testing large builds, staged builds, agent builds, or edit
 
 Forge support is currently scoped to Minecraft `1.20.1` and Forge `47.4.5`. Additional Minecraft versions should be added deliberately when an API or loader break requires a separate compatibility target.
 
+Minedit is required on the server for commands, AI calls, block placement, and rollback. Installing it on clients is optional and only adds client-side selection particles.
+
 ## Providers
 
 | Provider | Configure | Transport | Supported modes | Notes |
@@ -400,7 +402,7 @@ When adding another Minecraft version, prefer a small loader/version subproject 
 
 - Built with the NeoForge MDK template. The template files are MIT licensed by the NeoForged project; see `TEMPLATE_LICENSE.txt`.
 - Uses NeoForge and Minecraft Forge for mod loading and APIs.
-- Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through loader Jar-in-Jar support. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
+- Bundles a relocated private copy of Mozilla Rhino `1.8.0` as the JavaScript runtime. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
 - Uses OpenRouter's OpenAI-compatible chat completions API.
 - Optionally uses the OpenAI Codex app-server through the local `bridge/` helper.
 - Optionally uses Cursor CLI through the local `bridge/` helper.

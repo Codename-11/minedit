@@ -16,6 +16,8 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 def forgeMinecraftVersion = '1.20.1'
 def forgeVersion = '47.4.5'
 def generatedForgeSources = layout.buildDirectory.dir('generated/sources/forgeCompat/java')
+def relocatedRhinoTask = rootProject.tasks.named('relocateRhino')
+def relocatedRhinoJar = relocatedRhinoTask.flatMap { it.archiveFile }
 
 legacyForge {
     version = "${forgeMinecraftVersion}-${forgeVersion}"
@@ -87,13 +89,21 @@ tasks.register('generateForgeCompatSources', Sync) {
 
 tasks.named('compileJava').configure {
     dependsOn tasks.named('generateForgeCompatSources')
+    dependsOn relocatedRhinoTask
 }
 
 dependencies {
-    jarJar(implementation(group: 'org.mozilla', name: 'rhino')) {
-        version {
-            prefer '1.8.0'
-        }
+    implementation files(relocatedRhinoJar)
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn relocatedRhinoTask
+    from(zipTree(relocatedRhinoJar)) {
+        exclude 'module-info.class'
+        exclude 'META-INF/versions/**/module-info.class'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
     }
 }
 
