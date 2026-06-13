@@ -588,7 +588,7 @@ public final class BuildJobService {
 
     private static AiCompletion complete(AiRequestOptions options, String prompt, CancellationToken token, java.util.function.Consumer<String> progress) throws Exception {
         if (options.provider() == AiProvider.CODEX_LOCAL) {
-            return CODEX_CLIENT.complete(options.codexUrl(), options.model(), options.effort(), prompt, token);
+            return CODEX_CLIENT.complete(options.codexUrl(), options.codexToken(), options.model(), options.effort(), prompt, token);
         }
         if (options.provider() == AiProvider.CURSOR) {
             return CURSOR_CLIENT.complete(options.codexUrl(), options.model(), options.effort(), prompt, token);
@@ -601,7 +601,7 @@ public final class BuildJobService {
 
     private static AiCompletion agentBuildCompletion(AiRequestOptions options, String prompt, int width, int depth, CancellationToken token, java.util.function.Consumer<String> progress) throws Exception {
         if (options.provider() == AiProvider.CODEX_LOCAL) {
-            return CODEX_CLIENT.agentBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress);
+            return CODEX_CLIENT.agentBuild(options.codexUrl(), options.codexToken(), options.model(), options.effort(), prompt, width, depth, token, progress);
         }
         if (options.provider() == AiProvider.CURSOR) {
             return CURSOR_CLIENT.agentBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress);
@@ -614,7 +614,7 @@ public final class BuildJobService {
 
     private static AiCompletion agentStepByStepCompletion(AiRequestOptions options, String prompt, int width, int depth, CancellationToken token, java.util.function.Consumer<String> progress, java.util.function.Consumer<AgentStepBatch> batchConsumer) throws Exception {
         if (options.provider() == AiProvider.CODEX_LOCAL) {
-            return CODEX_CLIENT.agentStepByStepBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress, batch ->
+            return CODEX_CLIENT.agentStepByStepBuild(options.codexUrl(), options.codexToken(), options.model(), options.effort(), prompt, width, depth, token, progress, batch ->
                     batchConsumer.accept(new AgentStepBatch(batch.id(), batch.code(), batch.operationCount(), batch.nonAirBlocks(), batch.summary())));
         }
         if (options.provider() == AiProvider.CURSOR) {

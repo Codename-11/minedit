@@ -1,8 +1,8 @@
 # Minedit
 
-Minedit is an experimental Minecraft mod for building and editing structures with AI models through OpenRouter, a local bridge for Codex or Cursor, or a Hermes runs endpoint.
+Minedit is an experimental Minecraft mod for building and editing structures with AI models through OpenRouter, Codex app-server, a local bridge for Codex or Cursor, or a Hermes runs endpoint.
 
-Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It can also edit existing builds with compact line-aware patches, generate builds in focused stages, and run local bridge agent modes.
+Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It can also edit existing builds with compact line-aware patches, generate builds in focused stages, and run agent modes.
 
 This fork is maintained as a multi-loader, multi-provider build. The current focus is preserving the existing NeoForge behavior while adding Forge 1.20.1 support and a cleaner provider path for local and remote agents.
 
@@ -10,9 +10,9 @@ This fork is maintained as a multi-loader, multi-provider build. The current foc
 
 Minedit is a work in progress. Expect things to break.
 
-This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Hermes requests use the Hermes endpoint and token you configure and may consume whatever account or runtime that endpoint is backed by. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
+This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex requests use your Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Hermes requests use the Hermes endpoint and token you configure and may consume whatever account or runtime that endpoint is backed by. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
 
-Your OpenRouter API key and saved Hermes token are stored in plaintext in your Minecraft game directory at `config/minedit.properties`. They are not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
+Your OpenRouter API key, saved Codex app-server token, and saved Hermes token are stored in plaintext in your Minecraft game directory at `config/minedit.properties`. They are not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
 
 Back up worlds before testing large builds, staged builds, agent builds, or edits.
 
@@ -32,14 +32,15 @@ Minedit is required on the server for commands, AI calls, block placement, and r
 | Provider | Configure | Transport | Supported modes | Notes |
 | --- | --- | --- | --- | --- |
 | OpenRouter | `/provider openrouter`, `/apikey <key>` | OpenAI-compatible chat completions | build, staged build, edit, quick edit | Default provider. Supports streaming progress and usage lookup. |
-| Codex | `/provider codex`, `/codexurl <url>` | Minedit bridge to spawned or WebSocket `codex app-server` | build, staged build, edit, quick edit, agent build, step-by-step agent build | `/provider codex-local` remains accepted. |
+| Codex | `/provider codex`, `/codexurl <url>`, `/codextoken <token>` | Direct `codex app-server` WebSocket or optional Minedit bridge | build, staged build, edit, quick edit, agent build | `/provider codex-local` remains accepted. Step-by-step uses one direct batch without bridge tools. |
 | Hermes | `/provider hermes`, `/hermesurl <url>`, `/hermestoken <token>` | Direct Hermes `/v1/runs` and SSE events | build, staged build, edit, quick edit, agent build | Approval requests are shown as progress messages; Minedit does not approve actions automatically. |
 | Cursor | `/provider cursor`, `/codexurl <url>` | Local Minedit bridge to Cursor CLI | build, staged build, edit, quick edit, agent build, step-by-step agent build | Cursor models come from `/model list cursor`. |
 
 Provider requirements:
 
 - OpenRouter API key for OpenRouter mode
-- Node.js 18+ and the Codex CLI for Codex bridge mode
+- Codex CLI for direct Codex app-server mode
+- Node.js 18+ for optional local bridge mode
 - Cursor CLI for local Cursor bridge mode
 - Hermes `/v1/runs` endpoint for Hermes mode
 
@@ -121,7 +122,7 @@ Each stage receives the previous stage code as context and should only output in
 
 ### Agent Build
 
-Agent mode works with the local bridge through Codex or Cursor, or directly through Hermes:
+Agent mode works directly through Codex app-server or Hermes, or through the local bridge for Codex/Cursor:
 
 ```mcfunction
 /provider codex
@@ -135,7 +136,7 @@ Agent mode works with the local bridge through Codex or Cursor, or directly thro
 
 `/build agent <prompt>` asks the configured agent provider to draft, preview, and revise before Minecraft places the final build.
 
-`/build agent step-by-step <prompt>` places the build in multiple visible steps. Step-by-step mode currently supports Codex and Cursor through the local bridge. Codex uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
+`/build agent step-by-step <prompt>` places the build in visible steps when the selected provider can emit batches. Codex direct app-server mode emits one final batch. Codex bridge mode uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
 
 ## Editing
 
@@ -159,9 +160,45 @@ Set quick edit reasoning effort:
 /edit set quickeffort low
 ```
 
+## Codex
+
+Minedit can connect directly to a Codex app-server WebSocket. Start Codex on the machine that should run the app-server:
+
+```sh
+codex app-server --listen ws://127.0.0.1:4500
+```
+
+Then in Minecraft:
+
+```mcfunction
+/provider codex
+/codexurl ws://127.0.0.1:4500
+/codex status
+/model gpt-5.5
+```
+
+For another host, run Codex there and use WebSocket auth. This example assumes a VPN or SSH tunnel:
+
+```sh
+codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /path/to/token
+```
+
+Then configure Minecraft:
+
+```mcfunction
+/provider codex
+/codexurl ws://codex-host:4500
+/codextoken <token>
+/codex status
+```
+
+Use `ws://` only for localhost, VPN, or SSH-tunneled connections. For shared or remote networks, put the app-server behind TLS and auth, then use `wss://`.
+
+Codex model ids usually do not use the OpenRouter `openai/` prefix. Minedit strips `openai/` automatically, so `openai/gpt-5.5` becomes `gpt-5.5`, but setting `/model gpt-5.5` is clearer when using Codex.
+
 ## Local Bridge
 
-The local bridge lets Minecraft talk to `codex app-server` or Cursor CLI through a small HTTP server. Minecraft always points to this bridge with `/codexurl`; the bridge can either start Codex itself or connect to an existing Codex app-server WebSocket.
+The local bridge is optional. Use it for Cursor, or when you want the original Minedit bridge behavior for Codex.
 
 Requirements:
 
@@ -203,24 +240,6 @@ Then in Minecraft:
 /codex status
 /model gpt-5.5
 ```
-
-To reuse an already-running Codex app-server, start Codex with a WebSocket listener and point the bridge at it:
-
-```sh
-codex app-server --listen ws://127.0.0.1:4500
-MINEDIT_CODEX_APP_SERVER_URL=ws://127.0.0.1:4500 npm --prefix bridge start
-```
-
-For another host, run the Codex app-server there and use WebSocket auth. This example assumes a VPN or SSH tunnel:
-
-```sh
-codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /path/to/token
-MINEDIT_CODEX_APP_SERVER_URL=ws://codex-host:4500 MINEDIT_CODEX_APP_SERVER_TOKEN_FILE=/path/to/token npm --prefix bridge start
-```
-
-Use `ws://` only for localhost, VPN, or SSH-tunneled connections. For shared or remote networks, put the app-server behind TLS and auth, then use `wss://`.
-
-Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge strips `openai/` automatically, so `openai/gpt-5.5` becomes `gpt-5.5`, but setting `/model gpt-5.5` is clearer when using Codex.
 
 For Cursor:
 
@@ -295,11 +314,11 @@ OpenRouter streaming: enabled
 
 `/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
 
-`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are cancelled through the local bridge when possible, and Hermes runs are stopped through the configured runs endpoint when possible.
+`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Direct Codex jobs are stopped by closing the app-server WebSocket, bridge-backed Codex/Cursor agent jobs are cancelled through the local bridge when possible, and Hermes runs are stopped through the configured runs endpoint when possible.
 
 `/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge/Hermes configuration, current selection, active AI generations, and queued block placement jobs.
 
-Settings are saved in `config/minedit.properties`. The OpenRouter API key and Hermes token in that file are plaintext and belong to the whole Minecraft game directory/profile, not a single world. The local bridge URL, Hermes URL, and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+Settings are saved in `config/minedit.properties`. The OpenRouter API key, Codex app-server token, and Hermes token in that file are plaintext and belong to the whole Minecraft game directory/profile, not a single world. The Codex URL, Hermes URL, and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
 ## Manual Export and Import
 

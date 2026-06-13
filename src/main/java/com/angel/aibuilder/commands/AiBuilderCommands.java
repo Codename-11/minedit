@@ -63,7 +63,7 @@ public class AiBuilderCommands {
                             try {
                                 AiBuilderSettings.setProvider(provider.id());
                                 if (provider == AiProvider.CODEX_LOCAL) {
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex local bridge. Start it with `npm --prefix bridge start`, then use /codex status. The alias /provider codex also works.").withStyle(ChatFormatting.GREEN), false);
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex. Use /codexurl http://... for the bridge or ws://... for direct app-server, then /codex status.").withStyle(ChatFormatting.GREEN), false);
                                 } else if (provider == AiProvider.HERMES) {
                                     ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Hermes. Configure with /hermesurl and /hermestoken if your Hermes endpoint requires a token.").withStyle(ChatFormatting.GREEN), false);
                                 } else if (provider == AiProvider.CURSOR) {
@@ -83,9 +83,21 @@ public class AiBuilderCommands {
                             try {
                                 String url = StringArgumentType.getString(ctx, "url");
                                 AiBuilderSettings.setCodexUrl(url);
-                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit local bridge URL set to " + url).withStyle(ChatFormatting.GREEN), false);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Codex URL set to " + url).withStyle(ChatFormatting.GREEN), false);
                             } catch (IOException e) {
-                                ctx.getSource().sendFailure(Component.literal("Could not save local bridge URL: " + e.getMessage()));
+                                ctx.getSource().sendFailure(Component.literal("Could not save Codex URL: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("codextoken")
+                .then(Commands.argument("token", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            try {
+                                AiBuilderSettings.setCodexToken(StringArgumentType.getString(ctx, "token"));
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Codex app-server token saved.").withStyle(ChatFormatting.GREEN), false);
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save Codex token: " + e.getMessage()));
                             }
                             return 1;
                         })));
@@ -121,17 +133,18 @@ public class AiBuilderCommands {
                             CommandSourceStack source = ctx.getSource();
                             MinecraftServer server = source.getServer();
                             String url = AiBuilderSettings.codexUrl();
+                            String token = AiBuilderSettings.codexTokenOrEnv();
                             String model = AiBuilderSettings.model();
-                            source.sendSuccess(() -> Component.literal("Minedit: checking Codex bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+                            source.sendSuccess(() -> Component.literal("Minedit: checking Codex at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
                             CompletableFuture.supplyAsync(() -> {
                                 try {
-                                    return CODEX_CLIENT.status(url, model);
+                                    return CODEX_CLIENT.status(url, token, model);
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
                             }).thenAccept(status -> server.execute(() -> sendCodexStatus(source, status, model)))
                                     .exceptionally(error -> {
-                                        server.execute(() -> source.sendFailure(Component.literal("Minedit Codex bridge error: " + rootMessage(error))));
+                                        server.execute(() -> source.sendFailure(Component.literal("Minedit Codex error: " + rootMessage(error))));
                                         return null;
                                     });
                             return 1;
@@ -477,11 +490,14 @@ public class AiBuilderCommands {
         String model = AiBuilderSettings.model();
         String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
         boolean streaming = AiBuilderSettings.streaming();
-        if (provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR) {
-            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming);
+        if (provider == AiProvider.CODEX_LOCAL) {
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), AiBuilderSettings.codexTokenOrEnv(), "", "", model, effort, streaming);
+        }
+        if (provider == AiProvider.CURSOR) {
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), "", "", "", model, effort, streaming);
         }
         if (provider == AiProvider.HERMES) {
-            return new AiRequestOptions(provider, "", "", AiBuilderSettings.hermesUrl(), AiBuilderSettings.hermesTokenOrEnv(), model, effort, streaming);
+            return new AiRequestOptions(provider, "", "", "", AiBuilderSettings.hermesUrl(), AiBuilderSettings.hermesTokenOrEnv(), model, effort, streaming);
         }
 
         String apiKey = AiBuilderSettings.apiKey();
@@ -562,6 +578,8 @@ public class AiBuilderCommands {
         String codexUrl = AiBuilderSettings.codexUrl();
         String hermesUrl = AiBuilderSettings.hermesUrl();
         boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
+        boolean hasCodexToken = !AiBuilderSettings.codexToken().isEmpty();
+        boolean hasCodexEnvToken = !AiBuilderSettings.codexTokenOrEnv().isEmpty() && !hasCodexToken;
         boolean hasHermesToken = !AiBuilderSettings.hermesToken().isEmpty();
         boolean hasHermesEnvToken = !AiBuilderSettings.hermesTokenOrEnv().isEmpty() && !hasHermesToken;
 
@@ -572,7 +590,8 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
-        source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Codex URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Codex token: " + (hasCodexToken ? "saved" : hasCodexEnvToken ? "from MINEDIT_CODEX_APP_SERVER_TOKEN" : "not set")).withStyle(hasCodexToken || hasCodexEnvToken ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Hermes URL: " + hermesUrl).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Hermes token: " + (hasHermesToken ? "saved" : hasHermesEnvToken ? "from HERMES_GATEWAY_TOKEN" : "not set")).withStyle(hasHermesToken || hasHermesEnvToken ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
@@ -594,11 +613,12 @@ public class AiBuilderCommands {
     }
 
     private static void sendCodexStatus(CommandSourceStack source, CodexLocalClient.Status status, String currentModel) {
+        String target = status.directAppServer() ? "Codex app-server" : "Codex bridge";
         if (status.needsLogin()) {
-            source.sendFailure(Component.literal("Codex bridge connected, but Codex is not logged in. Run `codex login` in a terminal, then restart the bridge."));
+            source.sendFailure(Component.literal(target + " connected, but Codex is not logged in. Run `codex login` on the Codex host, then retry."));
             return;
         }
-        source.sendSuccess(() -> Component.literal("Codex bridge connected. Auth: " + status.authLabel() + ". Models: " + status.modelCount() + ".").withStyle(ChatFormatting.GREEN), false);
+        source.sendSuccess(() -> Component.literal(target + " connected. Auth: " + status.authLabel() + ". Models: " + status.modelCount() + ".").withStyle(ChatFormatting.GREEN), false);
         if (!status.defaultModel().isEmpty()) {
             source.sendSuccess(() -> Component.literal("Codex default model: " + status.defaultModel()).withStyle(ChatFormatting.GRAY), false);
         }

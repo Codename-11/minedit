@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 
 public enum AiProvider {
     OPENROUTER("openrouter", "OpenRouter"),
-    CODEX_LOCAL("codex-local", "Codex local bridge", "codex"),
+    CODEX_LOCAL("codex-local", "Codex", "codex"),
     HERMES("hermes", "Hermes agent"),
     CURSOR("cursor", "Cursor local bridge");
 

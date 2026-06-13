@@ -33,6 +33,20 @@ public final class AiBuilderSettings {
         return PROPERTIES.getProperty("codex_url", "http://127.0.0.1:8765").trim();
     }
 
+    public static synchronized String codexToken() {
+        load();
+        return PROPERTIES.getProperty("codex_token", "").trim();
+    }
+
+    public static synchronized String codexTokenOrEnv() {
+        String configured = codexToken();
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        String env = System.getenv("MINEDIT_CODEX_APP_SERVER_TOKEN");
+        return env == null ? "" : env.trim();
+    }
+
     public static synchronized String hermesUrl() {
         load();
         return PROPERTIES.getProperty("hermes_url", "http://127.0.0.1:8642/v1").trim();
@@ -87,6 +101,12 @@ public final class AiBuilderSettings {
     public static synchronized void setCodexUrl(String url) throws IOException {
         load();
         PROPERTIES.setProperty("codex_url", url.trim());
+        save();
+    }
+
+    public static synchronized void setCodexToken(String token) throws IOException {
+        load();
+        PROPERTIES.setProperty("codex_token", token.trim());
         save();
     }
 
