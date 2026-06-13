@@ -444,6 +444,68 @@ public final class BuildJobService {
         startWithPrompt(player, selection, options, PromptFactory.quickEdit(selection, buildCode.quickContext(), userPrompt), buildCode.lineMap(), false);
     }
 
+    public static void chat(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
+        MinecraftServer server = player.level().getServer();
+        UUID playerId = player.getUUID();
+        ActiveGeneration generation = beginGeneration(playerId);
+        CompletableFuture.supplyAsync(() -> {
+            generation.token().attachCurrentThread();
+            String prompt = chatPrompt(selection, userPrompt);
+            AiCompletion completion = null;
+            String code = null;
+            try {
+                generation.token().throwIfCancelled();
+                completion = complete(options, prompt, generation.token(), message -> sendProgress(server, playerId, "Minedit chat: " + message));
+                generation.token().throwIfCancelled();
+                if (selection != null && mayContainBuildCode(completion.text())) {
+                    code = ResponseParser.extractCode(completion.text());
+                    BuildPlan plan = JsBuildRunner.run(code, selection.width(), selection.depth(), Map.of());
+                    BuildDebugFiles.writeLast(prompt, completion.text(), code);
+                    return new ChatResult(completion.text(), code, plan, completion.usageSummary(), completion.pendingUsageId(), null);
+                }
+                BuildDebugFiles.writeLast(prompt, completion.text(), "");
+                return new ChatResult(completion.text(), "", null, completion.usageSummary(), completion.pendingUsageId(), null);
+            } catch (Exception e) {
+                BuildDebugFiles.writeLast(prompt, completion == null ? null : completion.text(), code);
+                return new ChatResult(completion == null ? "" : completion.text(), code, null, "", "", stoppedException(generation, e));
+            } finally {
+                generation.token().detachCurrentThread();
+                endGeneration(generation);
+            }
+        }).thenAccept(result -> server.execute(() -> {
+            ServerPlayer currentPlayer = server.getPlayerList().getPlayer(playerId);
+            if (currentPlayer == null) {
+                return;
+            }
+            if (result.error != null) {
+                if (isStopped(result.error)) {
+                    currentPlayer.sendSystemMessage(Component.literal("Minedit chat stopped.").withStyle(ChatFormatting.YELLOW));
+                    return;
+                }
+                AiBuilderMod.LOGGER.error("AI chat failed", result.error);
+                currentPlayer.sendSystemMessage(Component.literal("Minedit chat failed: " + result.error.getMessage()).withStyle(ChatFormatting.RED));
+                return;
+            }
+            if (generation.token().isCancelled()) {
+                currentPlayer.sendSystemMessage(Component.literal("Minedit chat stopped.").withStyle(ChatFormatting.YELLOW));
+                return;
+            }
+            if (result.usageSummary != null && !result.usageSummary.isBlank()) {
+                currentPlayer.sendSystemMessage(Component.literal(result.usageSummary).withStyle(ChatFormatting.AQUA));
+            }
+            if (result.pendingUsageId != null && !result.pendingUsageId.isBlank()) {
+                scheduleOpenRouterUsageFetch(server, currentPlayer.getUUID(), options, result.pendingUsageId);
+            }
+            if (result.plan != null && selection != null) {
+                List<BuildOperation> operations = withInitialClear((ServerLevel) currentPlayer.level(), selection, result.plan.operations());
+                currentPlayer.sendSystemMessage(Component.literal("Minedit chat: queued " + operations.size() + " operations from the agent response.").withStyle(ChatFormatting.GREEN));
+                BuildQueue.enqueue(new QueuedBuild(currentPlayer, selection, operations));
+                return;
+            }
+            sendChatText(currentPlayer, result.text);
+        }));
+    }
+
     private static void startWithPrompt(ServerPlayer player, BuildSelection selection, AiRequestOptions options, String requestPrompt, Map<Integer, ExistingStructureScanner.Line> lines, boolean clearBeforeBuild) {
         MinecraftServer server = player.level().getServer();
         UUID playerId = player.getUUID();
@@ -569,6 +631,64 @@ public final class BuildJobService {
         }));
     }
 
+    private static String chatPrompt(BuildSelection selection, String userPrompt) {
+        String selectionContext = selection == null
+                ? "No build area is selected. Answer normally and do not return code."
+                : "A build area is selected: width " + selection.width() + ", depth " + selection.depth()
+                + ", base Y " + selection.baseY()
+                + ", X " + selection.minX() + ".." + selection.maxX()
+                + ", Z " + selection.minZ() + ".." + selection.maxZ() + ".";
+        return """
+                You are Minedit, a concise Minecraft building assistant.
+                Answer the player's message directly.
+                %s
+
+                If the player clearly asks you to build, edit, create, place, or construct something in the selected area, return only valid JavaScript containing function build(api) that fits that footprint.
+                If they are asking a question, planning, choosing a model/provider, or anything that should not change blocks, return plain chat text and no code.
+
+                Player message:
+                %s
+                """.formatted(selectionContext, userPrompt);
+    }
+
+    private static boolean mayContainBuildCode(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase();
+        return lower.contains("function build") || lower.contains("<code>") || lower.contains("```javascript") || lower.contains("```js");
+    }
+
+    private static void sendChatText(ServerPlayer player, String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isBlank()) {
+            player.sendSystemMessage(Component.literal("Minedit chat: no response.").withStyle(ChatFormatting.YELLOW));
+            return;
+        }
+        for (String line : wrapLines(clean, 220)) {
+            player.sendSystemMessage(Component.literal("Minedit chat: " + line).withStyle(ChatFormatting.AQUA));
+        }
+    }
+
+    private static List<String> wrapLines(String text, int maxLength) {
+        List<String> lines = new ArrayList<>();
+        for (String paragraph : text.split("\\R")) {
+            String remaining = paragraph.trim();
+            while (remaining.length() > maxLength) {
+                int split = remaining.lastIndexOf(' ', maxLength);
+                if (split < 80) {
+                    split = maxLength;
+                }
+                lines.add(remaining.substring(0, split).trim());
+                remaining = remaining.substring(split).trim();
+            }
+            if (!remaining.isBlank()) {
+                lines.add(remaining);
+            }
+        }
+        return lines.isEmpty() ? List.of("") : lines;
+    }
+
     private static List<BuildOperation> withInitialClear(ServerLevel level, BuildSelection selection, List<BuildOperation> operations) {
         int maxRelativeY = level.getMaxY() - 1 - selection.baseY();
         if (maxRelativeY < 0) {
@@ -661,6 +781,9 @@ public final class BuildJobService {
     }
 
     private record Result(String code, BuildPlan plan, String usageSummary, String pendingUsageId, Exception error) {
+    }
+
+    private record ChatResult(String text, String code, BuildPlan plan, String usageSummary, String pendingUsageId, Exception error) {
     }
 
     private record StepResult(String summary, Exception error) {

@@ -1,7 +1,10 @@
 package com.angel.aibuilder.hermes;
 
 import com.angel.aibuilder.ai.AiCompletion;
+import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.CancellationToken;
+import com.angel.aibuilder.ai.ProviderModel;
+import com.angel.aibuilder.ai.ProviderStatus;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -21,11 +24,44 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.function.Consumer;
 
 public final class HermesRunsClient {
     private static final Gson GSON = new Gson();
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
+
+    public ProviderStatus providerStatus(String baseUrl, String authToken, String currentModel) throws IOException, InterruptedException {
+        int statusCode = probeRunsApi(baseUrl, authToken);
+        boolean needsLogin = statusCode == 401 || statusCode == 403;
+        boolean authenticated = !needsLogin;
+        String authLabel;
+        if (needsLogin) {
+            authLabel = authToken == null || authToken.isBlank() ? "token required" : "token rejected";
+        } else {
+            authLabel = authToken == null || authToken.isBlank() ? "not required or unchecked" : "token accepted or not required";
+        }
+
+        return new ProviderStatus(
+                AiProvider.HERMES,
+                "Hermes runs API",
+                true,
+                authenticated,
+                needsLogin,
+                authLabel,
+                false,
+                0,
+                "",
+                false,
+                currentModel,
+                List.of(),
+                "Runs API probe returned HTTP " + statusCode + ". Hermes model listing is not exposed by the /v1/runs client."
+        );
+    }
+
+    public List<ProviderModel> listProviderModels(String baseUrl, String authToken) {
+        return List.of();
+    }
 
     public AiCompletion complete(String baseUrl, String authToken, String model, String effort, String prompt, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
         token.throwIfCancelled();
@@ -218,6 +254,20 @@ public final class HermesRunsClient {
             throw new IOException(errorMessage(response.body(), "Hermes returned HTTP " + response.statusCode()));
         }
         return json;
+    }
+
+    private int probeRunsApi(String baseUrl, String authToken) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint(baseUrl, "/runs"))
+                .timeout(Duration.ofSeconds(12))
+                .header("Accept", "application/json")
+                .GET();
+        addAuth(builder, authToken);
+
+        try {
+            return client.send(builder.build(), HttpResponse.BodyHandlers.discarding()).statusCode();
+        } catch (ConnectException | HttpConnectTimeoutException e) {
+            throw new IOException("Cannot connect to Hermes at " + baseUrl + ".", e);
+        }
     }
 
     private void stopRunAsync(String baseUrl, String authToken, String runId) {

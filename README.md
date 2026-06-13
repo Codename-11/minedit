@@ -31,10 +31,10 @@ Minedit is required on the server for commands, AI calls, block placement, and r
 
 | Provider | Configure | Transport | Supported modes | Notes |
 | --- | --- | --- | --- | --- |
-| OpenRouter | `/provider openrouter`, `/apikey <key>` | OpenAI-compatible chat completions | build, staged build, edit, quick edit | Default provider. Supports streaming progress and usage lookup. |
-| Codex | `/provider codex`, `/codexurl <url>`, `/codextoken <token>` | Direct `codex app-server` WebSocket or optional Minedit bridge | build, staged build, edit, quick edit, agent build | `/provider codex-local` remains accepted. Step-by-step uses one direct batch without bridge tools. |
-| Hermes | `/provider hermes`, `/hermesurl <url>`, `/hermestoken <token>` | Direct Hermes `/v1/runs` and SSE events | build, staged build, edit, quick edit, agent build | Approval requests are shown as progress messages; Minedit does not approve actions automatically. |
-| Cursor | `/provider cursor`, `/codexurl <url>` | Local Minedit bridge to Cursor CLI | build, staged build, edit, quick edit, agent build, step-by-step agent build | Cursor models come from `/model list cursor`. |
+| OpenRouter | `/minedit provider openrouter`, `/minedit apikey <key>` | OpenAI-compatible chat completions | build, staged build, edit, quick edit, chat | Default provider. Supports streaming progress and usage lookup. |
+| Codex | `/minedit provider codex`, `/minedit codex url <url>`, `/minedit codex token <token>` | Direct `codex app-server` WebSocket or optional Minedit bridge | build, staged build, edit, quick edit, agent build, chat | `/minedit provider codex-local` remains accepted. Step-by-step uses one direct batch without bridge tools. |
+| Hermes | `/minedit provider hermes`, `/minedit hermes url <url>`, `/minedit hermes token <token>` | Direct Hermes `/v1/runs` and SSE events | build, staged build, edit, quick edit, agent build, chat | Approval requests are shown as progress messages; Minedit does not approve actions automatically. |
+| Cursor | `/minedit provider cursor`, `/minedit codex url <url>` | Local Minedit bridge to Cursor CLI | build, staged build, edit, quick edit, agent build, step-by-step agent build, chat | Cursor models come from `/minedit model list cursor`. |
 
 Provider requirements:
 
@@ -77,17 +77,26 @@ Copy the jar from `forge1201/build/libs/` into your Forge 1.20.1 `mods` folder.
 Minedit uses OpenRouter by default.
 
 ```mcfunction
-/apikey <your-openrouter-key>
-/model openai/gpt-5.5
+/minedit apikey <your-openrouter-key>
+/minedit model openai/gpt-5.5
 ```
 
-Select two X/Z footprint corners by right-clicking blocks with a stick, then run:
+Select two X/Z footprint corners with a stick:
+
+- Left click a block to set `pos1`.
+- Right click a block to set `pos2`.
+
+Then run:
 
 ```mcfunction
-/build a detailed medieval blacksmith
+/minedit build a detailed medieval blacksmith
 ```
 
 Minedit uses the selected X/Z area as the footprint. Height is not capped by the selection.
+
+Legacy top-level commands such as `/build`, `/edit`, `/model`, and `/status` still work. New docs prefer the grouped `/minedit ...` commands.
+
+Install Minedit on the client to use `/minedit gui`, a small in-game control screen for status, model list, streaming, selection-tool, clear-selection, and stop controls. `/mineditgui` is also available as a client-only shortcut.
 
 ## Build Modes
 
@@ -96,7 +105,7 @@ Minedit uses the selected X/Z area as the footprint. Height is not capped by the
 One model call generates the whole build:
 
 ```mcfunction
-/build a cute house
+/minedit build a cute house
 ```
 
 Build mode clears existing non-air blocks in the selected footprint before placing the generated structure.
@@ -106,7 +115,7 @@ Build mode clears existing non-air blocks in the selected footprint before placi
 Several focused model calls build the structure in phases:
 
 ```mcfunction
-/build stages a detailed wizard tower
+/minedit build stages a detailed wizard tower
 ```
 
 The staged builder currently runs these stages:
@@ -125,31 +134,31 @@ Each stage receives the previous stage code as context and should only output in
 Agent mode works directly through Codex app-server or Hermes, or through the local bridge for Codex/Cursor:
 
 ```mcfunction
-/provider codex
+/minedit provider codex
 # or
-/provider cursor
+/minedit provider cursor
 # or
-/provider hermes
-/build agent <prompt>
-/build agent step-by-step <prompt>
+/minedit provider hermes
+/minedit build agent <prompt>
+/minedit build agent step-by-step <prompt>
 ```
 
-`/build agent <prompt>` asks the configured agent provider to draft, preview, and revise before Minecraft places the final build.
+`/minedit build agent <prompt>` asks the configured agent provider to draft, preview, and revise before Minecraft places the final build.
 
-`/build agent step-by-step <prompt>` places the build in visible steps when the selected provider can emit batches. Codex direct app-server mode emits one final batch. Codex bridge mode uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
+`/minedit build agent step-by-step <prompt>` places the build in visible steps when the selected provider can emit batches. Codex direct app-server mode emits one final batch. Codex bridge mode uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
 
 ## Editing
 
 Use `/edit` to modify the selected area based on its current blocks:
 
 ```mcfunction
-/edit make the roof steeper and add windows
+/minedit edit make the roof steeper and add windows
 ```
 
 Use quick edit for small targeted patches:
 
 ```mcfunction
-/edit quick remove the flower and change the oak planks to spruce
+/minedit edit quick remove the flower and change the oak planks to spruce
 ```
 
 Normal edit and quick edit use a compact line-aware representation of the current build, so models can emit small patches like `api.replaceLine(...)`, `api.clearLine(...)`, `api.set(...)`, or `api.fill(...)` instead of rebuilding unchanged geometry.
@@ -157,8 +166,18 @@ Normal edit and quick edit use a compact line-aware representation of the curren
 Set quick edit reasoning effort:
 
 ```mcfunction
-/edit set quickeffort low
+/minedit edit set quickeffort low
 ```
+
+## Chat
+
+Use chat mode when you want to ask the configured provider a question in-game without always starting a build:
+
+```mcfunction
+/minedit chat what would fit in this footprint?
+```
+
+If a selection exists and the message clearly asks Minedit to build, create, place, or construct something, the agent may return build code and Minedit will queue it in the selected area. Plain questions return chat text only.
 
 ## Codex
 
@@ -171,25 +190,38 @@ codex app-server --listen ws://127.0.0.1:4500
 Then in Minecraft:
 
 ```mcfunction
-/provider codex
-/codexurl ws://127.0.0.1:4500
-/codex status
-/model gpt-5.5
+/minedit provider codex
+/minedit codex url ws://127.0.0.1:4500
+/minedit codex status
+/minedit model gpt-5.5
 ```
 
-For another host, run Codex there and use WebSocket auth. This example assumes a VPN or SSH tunnel:
+For another LAN, VPN, or SSH-tunneled host, `0.0.0.0` requires WebSocket auth. On the Codex host:
 
 ```sh
-codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /path/to/token
+mkdir -p ~/.codex/minedit
+openssl rand -base64 32 > ~/.codex/minedit/app-server.token
+chmod 600 ~/.codex/minedit/app-server.token
+
+codex app-server \
+  --listen ws://0.0.0.0:4500 \
+  --ws-auth capability-token \
+  --ws-token-file ~/.codex/minedit/app-server.token
+```
+
+Copy the token with:
+
+```sh
+cat ~/.codex/minedit/app-server.token
 ```
 
 Then configure Minecraft:
 
 ```mcfunction
-/provider codex
-/codexurl ws://codex-host:4500
-/codextoken <token>
-/codex status
+/minedit provider codex
+/minedit codex url ws://codex-host:4500
+/minedit codex token <token>
+/minedit codex status
 ```
 
 Use `ws://` only for localhost, VPN, or SSH-tunneled connections. For shared or remote networks, put the app-server behind TLS and auth, then use `wss://`.
@@ -203,8 +235,8 @@ The local bridge is optional. Use it for Cursor, or when you want the original M
 Requirements:
 
 - Node.js 18+
-- Codex CLI installed and logged in for `/provider codex` or `/provider codex-local`
-- Cursor CLI installed and logged in for `/provider cursor`
+- Codex CLI installed and logged in for `/minedit provider codex` or `/minedit provider codex-local`
+- Cursor CLI installed and logged in for `/minedit provider cursor`
 - This repository or source zip available locally, because the bridge code lives in `bridge/`
 
 Log in once if needed:
@@ -235,22 +267,22 @@ http://127.0.0.1:8765
 Then in Minecraft:
 
 ```mcfunction
-/provider codex
-/codexurl http://127.0.0.1:8765
-/codex status
-/model gpt-5.5
+/minedit provider codex
+/minedit codex url http://127.0.0.1:8765
+/minedit codex status
+/minedit model gpt-5.5
 ```
 
 For Cursor:
 
 ```mcfunction
-/provider cursor
-/codexurl http://127.0.0.1:8765
-/model list cursor
-/model auto
+/minedit provider cursor
+/minedit codex url http://127.0.0.1:8765
+/minedit model list cursor
+/minedit model auto
 ```
 
-Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor model ids are the ids returned by `/model list cursor`, such as `auto` or account-specific ids like `gpt-5.5-medium`.
+Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor model ids are the ids returned by `/minedit model list cursor`, such as `auto` or account-specific ids like `gpt-5.5-medium`.
 
 ## Hermes
 
@@ -263,10 +295,10 @@ http://127.0.0.1:8642/v1
 Configure Hermes in Minecraft:
 
 ```mcfunction
-/provider hermes
-/hermesurl http://127.0.0.1:8642/v1
-/hermestoken <token>
-/model gpt-5.5
+/minedit provider hermes
+/minedit hermes url http://127.0.0.1:8642/v1
+/minedit hermes token <token>
+/minedit model gpt-5.5
 ```
 
 If no Hermes token is saved, Minedit will use the `HERMES_GATEWAY_TOKEN` environment variable when it is available. Hermes approval requests are surfaced as progress messages, but Minedit does not grant approvals automatically.
@@ -274,32 +306,39 @@ If no Hermes token is saved, Minedit will use the `HERMES_GATEWAY_TOKEN` environ
 ## Settings Commands
 
 ```mcfunction
-/provider openrouter
-/provider codex
-/provider codex-local
-/provider hermes
-/provider cursor
-/apikey <openrouter-key>
-/codexurl http://127.0.0.1:8765
-/codex status
-/hermesurl http://127.0.0.1:8642/v1
-/hermestoken <token>
-/model list cursor
-/model <model-id>
-/build export <prompt>
-/build import
-/effort none
-/effort minimal
-/effort low
-/effort medium
-/effort high
-/effort xhigh
-/effort max
-/streaming enabled
-/streaming disabled
-/stop
-/status
-/usage <openrouter-generation-id>
+/minedit provider openrouter
+/minedit provider codex
+/minedit provider codex-local
+/minedit provider hermes
+/minedit provider cursor
+/minedit apikey <openrouter-key>
+/minedit codex url ws://127.0.0.1:4500
+/minedit codex token <token>
+/minedit codex status
+/minedit hermes url http://127.0.0.1:8642/v1
+/minedit hermes token <token>
+/minedit model list
+/minedit model list cursor
+/minedit model <model-id>
+/minedit build export <prompt>
+/minedit build import
+/minedit chat <message>
+/minedit selection tool on
+/minedit selection tool off
+/minedit selection clear
+/minedit effort none
+/minedit effort minimal
+/minedit effort low
+/minedit effort medium
+/minedit effort high
+/minedit effort xhigh
+/minedit effort max
+/minedit streaming enabled
+/minedit streaming disabled
+/minedit stop
+/minedit status
+/minedit usage <openrouter-generation-id>
+/minedit gui
 ```
 
 Defaults:
@@ -312,11 +351,15 @@ quick edit effort: low
 OpenRouter streaming: enabled
 ```
 
-`/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
+`/minedit model list` checks the current provider by default. OpenRouter, Codex, and Cursor expose model ids; Hermes currently reports status only because the configured `/v1/runs` endpoint does not expose model discovery.
 
-`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Direct Codex jobs are stopped by closing the app-server WebSocket, bridge-backed Codex/Cursor agent jobs are cancelled through the local bridge when possible, and Hermes runs are stopped through the configured runs endpoint when possible.
+`/minedit streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/minedit streaming disabled` waits for the full response before showing usage and queueing placement.
 
-`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge/Hermes configuration, current selection, active AI generations, and queued block placement jobs.
+`/minedit selection tool off` disables the stick selector for your player so normal stick clicks work again. `/minedit selection tool on` re-enables left-click `pos1` and right-click `pos2` selection.
+
+`/minedit stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Direct Codex jobs are stopped by closing the app-server WebSocket, bridge-backed Codex/Cursor agent jobs are cancelled through the local bridge when possible, and Hermes runs are stopped through the configured runs endpoint when possible.
+
+`/minedit status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge/Hermes configuration, selection-tool state, current selection, active AI generations, and queued block placement jobs.
 
 Settings are saved in `config/minedit.properties`. The OpenRouter API key, Codex app-server token, and Hermes token in that file are plaintext and belong to the whole Minecraft game directory/profile, not a single world. The Codex URL, Hermes URL, and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
@@ -325,7 +368,7 @@ Settings are saved in `config/minedit.properties`. The OpenRouter API key, Codex
 To use a model outside Minedit without making an in-game API call:
 
 ```mcfunction
-/build export <prompt>
+/minedit build export <prompt>
 ```
 
 This writes the exact build prompt to `config/minedit-debug/export-prompt.txt` and creates `config/minedit-debug/import-build.js` if needed. Send the exported prompt to a model yourself, then paste either the full model response or just the returned `function build(api) { ... }` code into `import-build.js`.
@@ -333,10 +376,10 @@ This writes the exact build prompt to `config/minedit-debug/export-prompt.txt` a
 Then select the same footprint in Minecraft and run:
 
 ```mcfunction
-/build import
+/minedit build import
 ```
 
-Minedit parses the imported response through the same build-code parser used for API responses, clears the selected footprint like normal build mode, and queues the resulting block operations. For very small snippets, `/build import <code>` also works, but the file workflow is safer for real generated builds.
+Minedit parses the imported response through the same build-code parser used for API responses, clears the selected footprint like normal build mode, and queues the resulting block operations. For very small snippets, `/minedit build import <code>` also works, but the file workflow is safer for real generated builds.
 
 ## OpenRouter Usage and Cost
 
@@ -350,7 +393,7 @@ After OpenRouter builds/edits, Minedit prints usage data when available:
 - finish reason
 - generation id
 
-If OpenRouter's final generation metadata already includes cost, the first usage line includes it. Otherwise Minedit keeps checking in the background and sends a separate cost line when it becomes available. You can also run `/usage <generation-id>` to manually fetch the latest generation usage.
+If OpenRouter's final generation metadata already includes cost, the first usage line includes it. Otherwise Minedit keeps checking in the background and sends a separate cost line when it becomes available. You can also run `/minedit usage <generation-id>` to manually fetch the latest generation usage.
 
 Minedit only displays usage fields. It does not print API keys.
 
@@ -361,13 +404,13 @@ OpenRouter streaming mode shows progress and provider-supplied reasoning summari
 Undo the last generated build/edit for your player:
 
 ```mcfunction
-/reset build
+/minedit reset build
 ```
 
 Clear the current selection:
 
 ```mcfunction
-/reset selection
+/minedit selection clear
 ```
 
 ## Examples
@@ -426,7 +469,7 @@ These files may contain your prompts and generated code. They should not contain
 
 Minedit prompts models to avoid common Minecraft placement problems such as unsupported plants, inverted roofs, stair orientation mistakes, unreachable stairs or ladders, missing landings, roof gaps, trapped doors, missing lintels/header blocks above doors, isolated pane/fence/wall slivers, blocked paths, cramped rooms, low ceilings, short support pillars, blocked window views, empty rooms, under-decorated upper floors, unlit interiors, and fragile blocks without support. It also prompts models to treat non-enterable builds such as statues, monuments, fountains, terrain features, vehicles, and decorative objects differently from houses. It also checks Minecraft block survival rules before placing blocks, so unsupported fragile blocks may be skipped.
 
-Model output is still imperfect. Use `/reset build` and world backups while testing.
+Model output is still imperfect. Use `/minedit reset build` and world backups while testing.
 
 ## Architecture Notes
 
@@ -435,7 +478,7 @@ Model output is still imperfect. Use `/reset build` and world backups while test
 - The Forge 1.20.1 build lives in `forge1201/` and generates Forge-compatible sources from the shared Java sources during Gradle builds.
 - Loader differences are intentionally kept narrow: Forge-specific metadata, client bootstrap, event/import rewrites, and small Minecraft 1.20.1 API shims live in the Forge subproject.
 - Provider selection flows through `AiProvider`, `AiRequestOptions`, and provider-specific clients.
-- Generated builds are constrained to the selected footprint/build zone. `/reset build` restores the pre-edit snapshot for the last generated build/edit when available.
+- Generated builds are constrained to the selected footprint/build zone. `/minedit reset build` restores the pre-edit snapshot for the last generated build/edit when available.
 
 When adding another Minecraft version, prefer a small loader/version subproject first. Move code into a deeper common/platform abstraction only when compatibility rewrites become hard to reason about.
 

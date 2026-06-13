@@ -1,7 +1,10 @@
 package com.angel.aibuilder.cursor;
 
 import com.angel.aibuilder.ai.AiCompletion;
+import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.CancellationToken;
+import com.angel.aibuilder.ai.ProviderModel;
+import com.angel.aibuilder.ai.ProviderStatus;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -61,6 +64,35 @@ public final class CursorLocalClient {
         );
     }
 
+    public ProviderStatus providerStatus(String baseUrl, String currentModel) throws IOException, InterruptedException {
+        Status status = status(baseUrl);
+        List<ProviderModel> models = List.of();
+        boolean modelsAvailable = false;
+        String detail = status.status();
+        try {
+            models = listProviderModels(baseUrl);
+            modelsAvailable = true;
+        } catch (IOException | RuntimeException e) {
+            detail = detail.isBlank() ? "Model list unavailable: " + e.getMessage() : detail + " Model list unavailable: " + e.getMessage();
+        }
+
+        return new ProviderStatus(
+                AiProvider.CURSOR,
+                "Cursor local bridge",
+                true,
+                status.authenticated(),
+                !status.authenticated(),
+                status.authenticated() ? status.binary() + " authenticated" : status.binary() + " not authenticated",
+                modelsAvailable,
+                models.size(),
+                "",
+                "auto".equalsIgnoreCase(currentModel) || modelAvailable(models, currentModel),
+                currentModel,
+                List.of(),
+                detail
+        );
+    }
+
     public List<Model> listModels(String baseUrl) throws IOException, InterruptedException {
         JsonObject json = sendJson(endpoint(baseUrl, "/cursor/models"), "GET", null, Duration.ofSeconds(45));
         JsonArray models = json.getAsJsonArray("models");
@@ -76,6 +108,14 @@ public final class CursorLocalClient {
                     result.add(new Model(id, string(object, "displayName", id)));
                 }
             }
+        }
+        return List.copyOf(result);
+    }
+
+    public List<ProviderModel> listProviderModels(String baseUrl) throws IOException, InterruptedException {
+        List<ProviderModel> result = new ArrayList<>();
+        for (Model model : listModels(baseUrl)) {
+            result.add(new ProviderModel(AiProvider.CURSOR, model.id(), model.displayName(), false, false, List.of()));
         }
         return List.copyOf(result);
     }
@@ -256,6 +296,19 @@ public final class CursorLocalClient {
     private static int integer(JsonObject object, String key, int fallback) {
         JsonElement value = object.get(key);
         return value != null && value.isJsonPrimitive() && !value.isJsonNull() ? value.getAsInt() : fallback;
+    }
+
+    private static boolean modelAvailable(List<ProviderModel> models, String currentModel) {
+        String requested = currentModel == null ? "" : currentModel.trim();
+        if (requested.isBlank()) {
+            return false;
+        }
+        for (ProviderModel model : models) {
+            if (requested.equals(model.id()) || requested.equals(model.displayName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public record Status(boolean authenticated, String status, String binary) {

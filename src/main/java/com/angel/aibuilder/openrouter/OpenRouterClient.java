@@ -1,7 +1,10 @@
 package com.angel.aibuilder.openrouter;
 
 import com.angel.aibuilder.ai.AiCompletion;
+import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.CancellationToken;
+import com.angel.aibuilder.ai.ProviderModel;
+import com.angel.aibuilder.ai.ProviderStatus;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -21,6 +24,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
@@ -28,6 +33,7 @@ import java.util.function.Consumer;
 public final class OpenRouterClient {
     private static final Gson GSON = new Gson();
     private static final URI ENDPOINT = URI.create("https://openrouter.ai/api/v1/chat/completions");
+    private static final URI MODELS_ENDPOINT = URI.create("https://openrouter.ai/api/v1/models");
     private static final URI GENERATION_ENDPOINT = URI.create("https://openrouter.ai/api/v1/generation");
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
@@ -38,6 +44,53 @@ public final class OpenRouterClient {
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt, Consumer<String> progress) throws IOException, InterruptedException {
         return complete(apiKey, model, effort, prompt, true, new CancellationToken(), progress);
+    }
+
+    public List<String> listModels() throws IOException, InterruptedException {
+        return listProviderModels("").stream().map(ProviderModel::id).toList();
+    }
+
+    public ProviderStatus providerStatus(String apiKey, String currentModel, boolean streaming) throws InterruptedException {
+        List<ProviderModel> models;
+        boolean reachable = true;
+        String detail = "Streaming " + (streaming ? "enabled" : "disabled") + " for OpenRouter requests.";
+        try {
+            models = fetchProviderModels(apiKey);
+        } catch (IOException | RuntimeException e) {
+            reachable = false;
+            models = staticFallbackModels();
+            detail += " Model API unavailable: " + e.getMessage() + ". Showing static fallback models.";
+        }
+
+        return new ProviderStatus(
+                AiProvider.OPENROUTER,
+                "OpenRouter API",
+                reachable,
+                apiKey != null && !apiKey.isBlank(),
+                apiKey == null || apiKey.isBlank(),
+                apiKey == null || apiKey.isBlank() ? "API key not set" : "API key saved",
+                true,
+                models.size(),
+                "",
+                modelAvailable(models, currentModel),
+                currentModel,
+                List.of(),
+                detail
+        );
+    }
+
+    public List<ProviderModel> listProviderModels(String apiKey) throws IOException, InterruptedException {
+        try {
+            return fetchProviderModels(apiKey);
+        } catch (IOException | RuntimeException e) {
+            if (apiKey == null || apiKey.isBlank()) {
+                return staticFallbackModels();
+            }
+            if (e instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new IOException("OpenRouter model list returned invalid data.", e);
+        }
     }
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt, boolean stream, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
@@ -198,6 +251,67 @@ public final class OpenRouterClient {
                 : json;
         Optional<String> cost = costDisplay(data);
         return new UsageReport(formatGenerationUsage(data, generationId, cost), formatGenerationCost(data, generationId, cost), cost.isPresent());
+    }
+
+    private List<ProviderModel> fetchProviderModels(String apiKey) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(MODELS_ENDPOINT)
+                .timeout(Duration.ofSeconds(30))
+                .header("Accept", "application/json");
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey.trim());
+        }
+
+        HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("OpenRouter models returned HTTP " + response.statusCode() + ": " + response.body());
+        }
+
+        JsonObject json = parseJson(response.body());
+        JsonArray data = json.getAsJsonArray("data");
+        List<ProviderModel> models = new ArrayList<>();
+        if (data != null) {
+            for (JsonElement element : data) {
+                if (!element.isJsonObject()) {
+                    continue;
+                }
+                JsonObject object = element.getAsJsonObject();
+                String id = string(object, "id", "");
+                if (!id.isBlank()) {
+                    models.add(new ProviderModel(
+                            AiProvider.OPENROUTER,
+                            id,
+                            string(object, "name", id),
+                            false,
+                            false,
+                            List.of()
+                    ));
+                }
+            }
+        }
+        if (models.isEmpty()) {
+            throw new IOException("OpenRouter returned no models.");
+        }
+        return List.copyOf(models);
+    }
+
+    private static List<ProviderModel> staticFallbackModels() {
+        return List.of(
+                new ProviderModel(AiProvider.OPENROUTER, "openai/gpt-5.5", "OpenAI GPT-5.5", false, true, List.of()),
+                new ProviderModel(AiProvider.OPENROUTER, "~openai/gpt-latest", "OpenAI latest alias", false, false, List.of())
+        );
+    }
+
+    private static boolean modelAvailable(List<ProviderModel> models, String currentModel) {
+        String requested = currentModel == null ? "" : currentModel.trim();
+        if (requested.isBlank()) {
+            return false;
+        }
+        for (ProviderModel model : models) {
+            if (requested.equals(model.id()) || requested.equals(model.displayName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Optional<GenerationUsage> pollGenerationUsage(String apiKey, String generationId, int attempts, Duration retryDelay) throws InterruptedException {
@@ -374,6 +488,18 @@ public final class OpenRouterClient {
 
     private static String readBody(InputStream body) throws IOException {
         return new String(body.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static JsonObject parseJson(String body) throws IOException {
+        try {
+            JsonElement parsed = JsonParser.parseString(body);
+            if (!parsed.isJsonObject()) {
+                throw new IOException("OpenRouter returned non-object JSON.");
+            }
+            return parsed.getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("OpenRouter returned invalid JSON: " + body, e);
+        }
     }
 
     private static String assistantText(JsonObject json) {

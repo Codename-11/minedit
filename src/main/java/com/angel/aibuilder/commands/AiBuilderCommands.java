@@ -2,6 +2,8 @@ package com.angel.aibuilder.commands;
 
 import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.AiRequestOptions;
+import com.angel.aibuilder.ai.ProviderModel;
+import com.angel.aibuilder.ai.ProviderStatus;
 import com.angel.aibuilder.build.BuildJobService;
 import com.angel.aibuilder.build.BuildQueue;
 import com.angel.aibuilder.build.BuildUndoManager;
@@ -9,10 +11,12 @@ import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
 import com.angel.aibuilder.cursor.CursorLocalClient;
 import com.angel.aibuilder.debug.BuildDebugFiles;
+import com.angel.aibuilder.hermes.HermesRunsClient;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.tree.CommandNode;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -35,6 +39,7 @@ public class AiBuilderCommands {
     private static final Set<String> DISABLED_VALUES = Set.of("disabled", "disable", "off", "false", "no");
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
     private static final CursorLocalClient CURSOR_CLIENT = new CursorLocalClient();
+    private static final HermesRunsClient HERMES_CLIENT = new HermesRunsClient();
     private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
 
     @SubscribeEvent
@@ -138,11 +143,11 @@ public class AiBuilderCommands {
                             source.sendSuccess(() -> Component.literal("Minedit: checking Codex at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
                             CompletableFuture.supplyAsync(() -> {
                                 try {
-                                    return CODEX_CLIENT.status(url, token, model);
+                                    return CODEX_CLIENT.providerStatus(url, token, model);
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
-                            }).thenAccept(status -> server.execute(() -> sendCodexStatus(source, status, model)))
+                            }).thenAccept(status -> server.execute(() -> sendProviderStatus(source, status, model)))
                                     .exceptionally(error -> {
                                         server.execute(() -> source.sendFailure(Component.literal("Minedit Codex error: " + rootMessage(error))));
                                         return null;
@@ -169,6 +174,10 @@ public class AiBuilderCommands {
 
         event.getDispatcher().register(Commands.literal("model")
                 .then(Commands.literal("list")
+                        .executes(ctx -> {
+                            listModels(ctx.getSource(), AiBuilderSettings.provider());
+                            return 1;
+                        })
                         .then(Commands.argument("provider", StringArgumentType.word())
                                 .executes(ctx -> {
                                     listModels(ctx.getSource(), StringArgumentType.getString(ctx, "provider"));
@@ -483,6 +492,68 @@ public class AiBuilderCommands {
                             ctx.getSource().sendSuccess(() -> Component.literal("Minedit: selection cleared.").withStyle(ChatFormatting.GREEN), false);
                             return 1;
                         })));
+
+        registerMineditRoot(event);
+    }
+
+    private static void registerMineditRoot(RegisterCommandsEvent event) {
+        CommandNode<CommandSourceStack> apikey = requireNode(event, "apikey");
+        CommandNode<CommandSourceStack> provider = requireNode(event, "provider");
+        CommandNode<CommandSourceStack> codex = requireNode(event, "codex");
+        CommandNode<CommandSourceStack> codexUrl = requireNode(event, "codexurl");
+        CommandNode<CommandSourceStack> codexToken = requireNode(event, "codextoken");
+        CommandNode<CommandSourceStack> hermesUrl = requireNode(event, "hermesurl");
+        CommandNode<CommandSourceStack> hermesToken = requireNode(event, "hermestoken");
+        CommandNode<CommandSourceStack> effort = requireNode(event, "effort");
+        CommandNode<CommandSourceStack> model = requireNode(event, "model");
+        CommandNode<CommandSourceStack> streaming = requireNode(event, "streaming");
+        CommandNode<CommandSourceStack> stop = requireNode(event, "stop");
+        CommandNode<CommandSourceStack> status = requireNode(event, "status");
+        CommandNode<CommandSourceStack> usage = requireNode(event, "usage");
+        CommandNode<CommandSourceStack> build = requireNode(event, "build");
+        CommandNode<CommandSourceStack> edit = requireNode(event, "edit");
+        CommandNode<CommandSourceStack> reset = requireNode(event, "reset");
+
+        event.getDispatcher().register(Commands.literal("minedit")
+                .then(Commands.literal("apikey").redirect(apikey))
+                .then(Commands.literal("provider")
+                        .redirect(provider)
+                        .then(Commands.literal("set").redirect(provider)))
+                .then(Commands.literal("codex")
+                        .redirect(codex)
+                        .then(Commands.literal("url").redirect(codexUrl))
+                        .then(Commands.literal("token").redirect(codexToken)))
+                .then(Commands.literal("hermes")
+                        .then(Commands.literal("url").redirect(hermesUrl))
+                        .then(Commands.literal("token").redirect(hermesToken)))
+                .then(Commands.literal("effort").redirect(effort))
+                .then(Commands.literal("model")
+                        .redirect(model)
+                        .then(Commands.literal("set").redirect(model)))
+                .then(Commands.literal("streaming").redirect(streaming))
+                .then(Commands.literal("stop").redirect(stop))
+                .then(Commands.literal("status").redirect(status))
+                .then(Commands.literal("usage").redirect(usage))
+                .then(Commands.literal("build").redirect(build))
+                .then(Commands.literal("edit").redirect(edit))
+                .then(Commands.literal("reset").redirect(reset))
+                .then(Commands.literal("chat")
+                        .then(Commands.argument("message", StringArgumentType.greedyString())
+                                .executes(ctx -> startChat(ctx.getSource(), StringArgumentType.getString(ctx, "message")))))
+                .then(Commands.literal("selection")
+                        .then(Commands.literal("clear").redirect(reset.getChild("selection")))
+                        .then(Commands.literal("tool")
+                                .executes(ctx -> sendSelectionToolStatus(ctx.getSource()))
+                                .then(Commands.argument("enabled", StringArgumentType.word())
+                                        .executes(ctx -> setSelectionTool(ctx.getSource(), StringArgumentType.getString(ctx, "enabled")))))));
+    }
+
+    private static CommandNode<CommandSourceStack> requireNode(RegisterCommandsEvent event, String name) {
+        CommandNode<CommandSourceStack> node = event.getDispatcher().getRoot().getChild(name);
+        if (node == null) {
+            throw new IllegalStateException("Missing command node: " + name);
+        }
+        return node;
     }
 
     private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {
@@ -516,43 +587,142 @@ public class AiBuilderCommands {
         return provider == AiProvider.CODEX_LOCAL || provider == AiProvider.HERMES || provider == AiProvider.CURSOR;
     }
 
+    private static int sendSelectionToolStatus(CommandSourceStack source) {
+        try {
+            ServerPlayer player = source.getPlayerOrException();
+            boolean enabled = SelectionManager.selectionToolEnabled(player.getUUID());
+            source.sendSuccess(() -> Component.literal("Minedit selection tool: " + (enabled ? "enabled" : "disabled") + ".").withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Selection tool mode is per player."));
+            return 0;
+        }
+    }
+
+    private static int setSelectionTool(CommandSourceStack source, String value) {
+        Boolean enabled = parseEnabled(value.trim().toLowerCase());
+        if (enabled == null) {
+            source.sendFailure(Component.literal("Selection tool must be enabled or disabled."));
+            return 0;
+        }
+        try {
+            ServerPlayer player = source.getPlayerOrException();
+            SelectionManager.setSelectionToolEnabled(player.getUUID(), enabled);
+            source.sendSuccess(() -> Component.literal("Minedit selection tool " + (enabled ? "enabled" : "disabled") + ".").withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Selection tool mode is per player."));
+            return 0;
+        }
+    }
+
+    private static int startChat(CommandSourceStack source, String message) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit chat is player-only."));
+            return 0;
+        }
+
+        AiRequestOptions options = requestOptions(source, false);
+        if (options == null) {
+            return 0;
+        }
+
+        BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+        source.sendSuccess(() -> Component.literal("Minedit chat: asking " + options.targetDescription() + " (" + options.effort() + ")...").withStyle(ChatFormatting.YELLOW), false);
+        BuildJobService.chat(player, selection, message, options);
+        return 1;
+    }
+
     private static void listModels(CommandSourceStack source, String providerId) {
         AiProvider provider = AiProvider.fromId(providerId).orElse(null);
         if (provider == null) {
             source.sendFailure(Component.literal("Provider must be one of: " + AiProvider.ids() + "."));
             return;
         }
-        if (provider != AiProvider.CURSOR) {
-            source.sendFailure(Component.literal("/model list currently only supports cursor."));
-            return;
-        }
-
         MinecraftServer server = source.getServer();
-        String url = AiBuilderSettings.codexUrl();
-        source.sendSuccess(() -> Component.literal("Minedit: checking Cursor models through local bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
-        CompletableFuture.supplyAsync(() -> {
-            try {
-                return CURSOR_CLIENT.listModels(url);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+        switch (provider) {
+            case CURSOR -> {
+                String url = AiBuilderSettings.codexUrl();
+                source.sendSuccess(() -> Component.literal("Minedit: checking Cursor models through local bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return CURSOR_CLIENT.listProviderModels(url);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).thenAccept(models -> server.execute(() -> sendModelList(source, provider, models)))
+                        .exceptionally(error -> {
+                            server.execute(() -> source.sendFailure(Component.literal("Cursor model list failed: " + rootMessage(error))));
+                            return null;
+                        });
             }
-        }).thenAccept(models -> server.execute(() -> sendCursorModelList(source, models)))
-                .exceptionally(error -> {
-                    server.execute(() -> source.sendFailure(Component.literal("Cursor model list failed: " + rootMessage(error))));
+            case CODEX_LOCAL -> {
+                String url = AiBuilderSettings.codexUrl();
+                String token = AiBuilderSettings.codexTokenOrEnv();
+                source.sendSuccess(() -> Component.literal("Minedit: checking Codex models at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return CODEX_CLIENT.listProviderModels(url, token);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).thenAccept(models -> server.execute(() -> sendModelList(source, provider, models)))
+                        .exceptionally(error -> {
+                            server.execute(() -> source.sendFailure(Component.literal("Codex model list failed: " + rootMessage(error))));
+                            return null;
+                        });
+            }
+            case OPENROUTER -> {
+                source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter models...").withStyle(ChatFormatting.YELLOW), false);
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return OPENROUTER_CLIENT.listProviderModels(AiBuilderSettings.apiKey());
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).thenAccept(models -> server.execute(() -> sendModelList(source, provider, models)))
+                        .exceptionally(error -> {
+                            server.execute(() -> source.sendFailure(Component.literal("OpenRouter model list failed: " + rootMessage(error))));
+                            return null;
+                        });
+            }
+            case HERMES -> {
+                String url = AiBuilderSettings.hermesUrl();
+                String token = AiBuilderSettings.hermesTokenOrEnv();
+                String model = AiBuilderSettings.model();
+                source.sendSuccess(() -> Component.literal("Minedit: checking Hermes status at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return HERMES_CLIENT.providerStatus(url, token, model);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).thenAccept(status -> server.execute(() -> {
+                    sendProviderStatus(source, status, model);
+                    source.sendFailure(Component.literal("Hermes model discovery is not exposed by the configured /v1/runs endpoint. Set the model manually with /model <id>."));
+                })).exceptionally(error -> {
+                    server.execute(() -> source.sendFailure(Component.literal("Hermes status failed: " + rootMessage(error))));
                     return null;
                 });
+            }
+        }
     }
 
-    private static void sendCursorModelList(CommandSourceStack source, List<CursorLocalClient.Model> models) {
+    private static void sendModelList(CommandSourceStack source, AiProvider provider, List<ProviderModel> models) {
+        String label = modelListLabel(provider);
         if (models.isEmpty()) {
-            source.sendFailure(Component.literal("Cursor returned no models."));
+            source.sendFailure(Component.literal(label + " returned no models."));
             return;
         }
 
-        source.sendSuccess(() -> Component.literal("Cursor models (" + models.size() + " ids):").withStyle(ChatFormatting.GOLD), false);
+        source.sendSuccess(() -> Component.literal(label + " models (" + models.size() + " ids):").withStyle(ChatFormatting.GOLD), false);
         StringBuilder chunk = new StringBuilder();
-        for (CursorLocalClient.Model model : models) {
-            String next = model.id();
+        int limit = provider == AiProvider.OPENROUTER ? Math.min(models.size(), 120) : models.size();
+        for (int i = 0; i < limit; i++) {
+            String next = models.get(i).id();
             if (!chunk.isEmpty() && chunk.length() + next.length() + 2 > 230) {
                 String text = chunk.toString();
                 source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
@@ -566,6 +736,13 @@ public class AiBuilderCommands {
         if (!chunk.isEmpty()) {
             String text = chunk.toString();
             source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
+        }
+        if (models.size() > limit) {
+            source.sendSuccess(() -> Component.literal("Showing first " + limit + " of " + models.size() + " OpenRouter ids. Browse the full catalog at https://openrouter.ai/models.").withStyle(ChatFormatting.YELLOW), false);
+        }
+        String currentModel = AiBuilderSettings.model();
+        if (modelAvailable(models, currentModel)) {
+            source.sendSuccess(() -> Component.literal("Current model is listed: " + currentModel).withStyle(ChatFormatting.GREEN), false);
         }
     }
 
@@ -588,7 +765,7 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Model: " + model).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Reasoning effort: " + effort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
-        source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Streaming for OpenRouter requests: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Codex URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Codex token: " + (hasCodexToken ? "saved" : hasCodexEnvToken ? "from MINEDIT_CODEX_APP_SERVER_TOKEN" : "not set")).withStyle(hasCodexToken || hasCodexEnvToken ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
@@ -598,6 +775,8 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
 
         if (source.getEntity() instanceof ServerPlayer player) {
+            boolean selectionTool = SelectionManager.selectionToolEnabled(player.getUUID());
+            source.sendSuccess(() -> Component.literal("Selection tool: " + (selectionTool ? "enabled" : "disabled")).withStyle(selectionTool ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
             SelectionManager.selection(player.getUUID()).ifPresentOrElse(selection -> {
                 String text = "Selection: "
                         + selection.width() + " x " + selection.depth()
@@ -612,21 +791,58 @@ public class AiBuilderCommands {
         }
     }
 
-    private static void sendCodexStatus(CommandSourceStack source, CodexLocalClient.Status status, String currentModel) {
-        String target = status.directAppServer() ? "Codex app-server" : "Codex bridge";
+    private static void sendProviderStatus(CommandSourceStack source, ProviderStatus status, String currentModel) {
+        String target = status.target().isEmpty() ? status.provider().displayName() : status.target();
         if (status.needsLogin()) {
-            source.sendFailure(Component.literal(target + " connected, but Codex is not logged in. Run `codex login` on the Codex host, then retry."));
+            source.sendFailure(Component.literal(target + " connected, but authentication is not ready. " + authHint(status.provider())));
             return;
         }
-        source.sendSuccess(() -> Component.literal(target + " connected. Auth: " + status.authLabel() + ". Models: " + status.modelCount() + ".").withStyle(ChatFormatting.GREEN), false);
+        ChatFormatting style = status.reachable() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
+        String modelSummary = status.modelsAvailable() ? ". Models: " + status.modelCount() + "." : ". Models: not exposed.";
+        source.sendSuccess(() -> Component.literal(target + " connected. Auth: " + status.authLabel() + modelSummary).withStyle(style), false);
         if (!status.defaultModel().isEmpty()) {
-            source.sendSuccess(() -> Component.literal("Codex default model: " + status.defaultModel()).withStyle(ChatFormatting.GRAY), false);
+            source.sendSuccess(() -> Component.literal(status.provider().displayName() + " default model: " + status.defaultModel()).withStyle(ChatFormatting.GRAY), false);
         }
         if (status.currentModelAvailable()) {
-            source.sendSuccess(() -> Component.literal("Current model works with Codex as " + status.normalizedCurrentModel() + ". Supported efforts: " + String.join(", ", status.supportedEfforts())).withStyle(ChatFormatting.GREEN), false);
-        } else {
-            source.sendFailure(Component.literal("Current model `" + currentModel + "` was not found in Codex. Try /model gpt-5.5."));
+            String efforts = status.supportedEfforts().isEmpty() ? "" : ". Supported efforts: " + String.join(", ", status.supportedEfforts());
+            source.sendSuccess(() -> Component.literal("Current model works with " + status.provider().displayName() + " as " + status.normalizedCurrentModel() + efforts + ".").withStyle(ChatFormatting.GREEN), false);
+        } else if (status.modelsAvailable()) {
+            source.sendFailure(Component.literal("Current model `" + currentModel + "` was not found in " + status.provider().displayName() + ". Try /model list " + status.provider().id() + "."));
         }
+        if (!status.detail().isBlank()) {
+            source.sendSuccess(() -> Component.literal(status.detail()).withStyle(ChatFormatting.GRAY), false);
+        }
+    }
+
+    private static String modelListLabel(AiProvider provider) {
+        return switch (provider) {
+            case OPENROUTER -> "OpenRouter";
+            case CODEX_LOCAL -> "Codex";
+            case HERMES -> "Hermes";
+            case CURSOR -> "Cursor";
+        };
+    }
+
+    private static String authHint(AiProvider provider) {
+        return switch (provider) {
+            case OPENROUTER -> "Set an OpenRouter key with /apikey <key>.";
+            case CODEX_LOCAL -> "Run `codex login` on the Codex host, then retry.";
+            case HERMES -> "Set the Hermes token with /hermestoken <token> if your endpoint requires one.";
+            case CURSOR -> "Run Cursor CLI authentication on the bridge host, then retry.";
+        };
+    }
+
+    private static boolean modelAvailable(List<ProviderModel> models, String currentModel) {
+        String requested = currentModel == null ? "" : currentModel.trim();
+        if (requested.isBlank()) {
+            return false;
+        }
+        for (ProviderModel model : models) {
+            if (requested.equals(model.id()) || requested.equals(model.displayName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String rootMessage(Throwable throwable) {

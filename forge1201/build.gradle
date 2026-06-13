@@ -59,6 +59,7 @@ tasks.register('generateForgeCompatSources', Sync) {
     inputs.property 'compatFilterVersion', '2'
     from(rootProject.file('src/main/java')) {
         exclude 'com/angel/aibuilder/client/AiBuilderClient.java'
+        exclude 'com/angel/aibuilder/client/MineditControlsScreen.java'
     }
     into generatedForgeSources
     filter { String line ->

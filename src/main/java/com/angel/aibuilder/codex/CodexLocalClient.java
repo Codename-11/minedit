@@ -1,7 +1,10 @@
 package com.angel.aibuilder.codex;
 
 import com.angel.aibuilder.ai.AiCompletion;
+import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.CancellationToken;
+import com.angel.aibuilder.ai.ProviderModel;
+import com.angel.aibuilder.ai.ProviderStatus;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -306,6 +309,52 @@ public final class CodexLocalClient {
         return new Status(needsLogin, authLabel, modelCount, defaultModel, currentModelAvailable, normalizedModel, supportedEfforts, false);
     }
 
+    public ProviderStatus providerStatus(String baseUrl, String codexToken, String currentModel) throws IOException, InterruptedException {
+        Status status = status(baseUrl, codexToken, currentModel);
+        String target = status.directAppServer() ? "Codex app-server" : "Codex bridge";
+        return new ProviderStatus(
+                AiProvider.CODEX_LOCAL,
+                target,
+                true,
+                !status.needsLogin(),
+                status.needsLogin(),
+                status.authLabel(),
+                true,
+                status.modelCount(),
+                status.defaultModel(),
+                status.currentModelAvailable(),
+                status.normalizedCurrentModel(),
+                status.supportedEfforts(),
+                ""
+        );
+    }
+
+    public List<String> listModels(String baseUrl, String codexToken) throws IOException, InterruptedException {
+        if (isDirectAppServerUrl(baseUrl)) {
+            try (DirectCodexAppServerSession session = DirectCodexAppServerSession.connect(client, URI.create(baseUrl.trim()), codexToken)) {
+                session.initialize();
+                return modelNames(listModelsDirect(session));
+            }
+        }
+
+        JsonObject json = sendJson(endpoint(baseUrl, "/status"), "GET", null, Duration.ofSeconds(45));
+        JsonArray models = json.getAsJsonArray("models");
+        return modelNames(models == null ? new JsonArray() : models);
+    }
+
+    public List<ProviderModel> listProviderModels(String baseUrl, String codexToken) throws IOException, InterruptedException {
+        if (isDirectAppServerUrl(baseUrl)) {
+            try (DirectCodexAppServerSession session = DirectCodexAppServerSession.connect(client, URI.create(baseUrl.trim()), codexToken)) {
+                session.initialize();
+                return providerModels(listModelsDirect(session));
+            }
+        }
+
+        JsonObject json = sendJson(endpoint(baseUrl, "/status"), "GET", null, Duration.ofSeconds(45));
+        JsonArray models = json.getAsJsonArray("models");
+        return providerModels(models == null ? new JsonArray() : models);
+    }
+
     private AiCompletion completeDirect(String baseUrl, String codexToken, String model, String effort, String prompt, CancellationToken token) throws IOException, InterruptedException {
         if (prompt == null || prompt.isBlank()) {
             throw new IOException("Missing prompt.");
@@ -554,6 +603,43 @@ public final class CodexLocalClient {
             }
         }
         return String.join(", ", visible);
+    }
+
+    private static List<String> modelNames(JsonArray models) {
+        List<String> names = new ArrayList<>();
+        for (JsonElement modelElement : models) {
+            if (!modelElement.isJsonObject()) {
+                continue;
+            }
+            String name = modelName(modelElement.getAsJsonObject());
+            if (!name.isBlank()) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    private static List<ProviderModel> providerModels(JsonArray models) {
+        List<ProviderModel> entries = new ArrayList<>();
+        for (JsonElement modelElement : models) {
+            if (!modelElement.isJsonObject()) {
+                continue;
+            }
+            JsonObject model = modelElement.getAsJsonObject();
+            String name = modelName(model);
+            if (name.isBlank()) {
+                continue;
+            }
+            entries.add(new ProviderModel(
+                    AiProvider.CODEX_LOCAL,
+                    name,
+                    string(model, "displayName", name),
+                    bool(model, "hidden"),
+                    bool(model, "isDefault"),
+                    effortList(model)
+            ));
+        }
+        return List.copyOf(entries);
     }
 
     private static String modelName(JsonObject model) {
