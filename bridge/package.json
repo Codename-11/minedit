@@ -2,6 +2,7 @@
   "name": "minedit-codex-bridge",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "start": "node minedit-codex-bridge.mjs"

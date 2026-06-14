@@ -107,6 +107,17 @@ tasks.named('jar', Jar).configure {
         exclude 'META-INF/*.SF'
         exclude 'META-INF/*.DSA'
     }
+    from(rootProject.file('LICENSE')) {
+        into 'META-INF'
+        rename { 'LICENSE-MINEDIT.txt' }
+    }
+    from(rootProject.file('THIRD_PARTY_NOTICES.md')) {
+        into 'META-INF'
+    }
+    from(rootProject.file('TEMPLATE_LICENSE.txt')) {
+        into 'META-INF'
+        rename { 'LICENSE-NEOFORGE-MDK.txt' }
+    }
 }
 
 def generateForgeModMetadata = tasks.register('generateForgeModMetadata', ProcessResources) {

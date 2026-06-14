@@ -209,6 +209,17 @@ tasks.named('jar', Jar).configure {
         exclude 'META-INF/*.SF'
         exclude 'META-INF/*.DSA'
     }
+    from('LICENSE') {
+        into 'META-INF'
+        rename { 'LICENSE-MINEDIT.txt' }
+    }
+    from('THIRD_PARTY_NOTICES.md') {
+        into 'META-INF'
+    }
+    from('TEMPLATE_LICENSE.txt') {
+        into 'META-INF'
+        rename { 'LICENSE-NEOFORGE-MDK.txt' }
+    }
 }
 
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.

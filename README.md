@@ -92,11 +92,14 @@ npm run docs:dev
 
 ## Credits
 
-- Built with the NeoForge MDK template.
+- Forked from [Angais/minedit](https://github.com/Angais/minedit). This fork keeps the original Minedit attribution while carrying substantial structural changes for multi-version/multi-loader builds, expanded provider support, local agent bridge workflows, versioned release artifacts, and the VitePress user docs.
+- Built with the NeoForge MDK template. The template files are MIT licensed by the NeoForged project; see `TEMPLATE_LICENSE.txt`.
 - Uses NeoForge and Minecraft Forge.
-- Bundles a relocated private copy of Mozilla Rhino `1.8.0`.
+- Bundles a relocated private copy of Mozilla Rhino `1.8.0`. Rhino remains licensed under the Mozilla Public License 2.0; its source and license details are listed in `THIRD_PARTY_NOTICES.md`.
 - Uses OpenRouter, optional Codex app-server, optional Cursor CLI, and optional Hermes `/v1/runs`.
 
 ## License
 
-Minedit is currently published as All Rights Reserved unless a separate license is added later. NeoForge MDK template files keep their original MIT license, documented in `TEMPLATE_LICENSE.txt`.
+Minedit's original code, documentation, and assets are open source under the [MIT License](LICENSE).
+
+Third-party components keep their original licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [TEMPLATE_LICENSE.txt](TEMPLATE_LICENSE.txt) for details.
